@@ -71,6 +71,23 @@ export default function Dashboard({ user }) {
     return "#fc8181";
   };
 
+  // storage is an array of drives: [{totalGB, usedGB, usedPercent, ...}]
+  const getStorageSummary = (storage) => {
+    if (!Array.isArray(storage) || storage.length === 0) return null;
+    const totalGB = storage.reduce((s, d) => s + (d.totalGB || 0), 0);
+    const usedGB  = storage.reduce((s, d) => s + (d.usedGB  || 0), 0);
+    const pct     = totalGB > 0 ? Math.round((usedGB / totalGB) * 100) : 0;
+    return `${Math.round(usedGB)} / ${Math.round(totalGB)} GB (${pct}%)`;
+  };
+
+  // vulnerabilities is an array of issue objects [{type, severity, description}]
+  const getSecuritySummary = (vulns) => {
+    if (!Array.isArray(vulns)) return null;
+    if (vulns.length === 0) return { text: "All clear ✓", color: "#48bb78" };
+    const n = vulns.length;
+    return { text: `${n} issue${n > 1 ? "s" : ""} found`, color: "#fc8181" };
+  };
+
   const formatDate = (ts) => {
     if (!ts) return t("dashboard.neverScanned");
     const d = ts.toDate ? ts.toDate() : new Date(ts);
@@ -165,26 +182,21 @@ export default function Dashboard({ user }) {
           <div style={styles.card}>
             <p style={styles.cardLabel}>{t("dashboard.sections.storage")}</p>
             <p style={styles.cardValueSm}>
-              {lastScan?.storage?.freeGB != null
-                ? `${lastScan.storage.freeGB} GB free`
-                : "—"}
+              {getStorageSummary(lastScan?.storage) ?? "—"}
             </p>
           </div>
 
           {/* Security */}
           <div style={styles.card}>
             <p style={styles.cardLabel}>{t("dashboard.sections.security")}</p>
-            <p
-              style={{
-                ...styles.cardValueSm,
-                color:
-                  lastScan?.security?.status === "good" ? "#48bb78" : "#fc8181",
-              }}
-            >
-              {lastScan?.security?.status
-                ? t(`dashboard.status.${lastScan.security.status}`)
-                : "—"}
-            </p>
+            {(() => {
+              const sec = getSecuritySummary(lastScan?.vulnerabilities);
+              return (
+                <p style={{ ...styles.cardValueSm, color: sec?.color ?? "#4a5568" }}>
+                  {sec?.text ?? "—"}
+                </p>
+              );
+            })()}
           </div>
         </div>
 
