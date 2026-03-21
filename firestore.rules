@@ -2,41 +2,39 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // ── User documents and all subcollections ──────────────────────────────
-    // Each user can only access their own data. No cross-user reads possible.
+    // ── User document ──────────────────────────────────────────────────────
     match /users/{uid} {
       allow read, write: if request.auth != null && request.auth.uid == uid;
 
-      // Scans subcollection — user-owned, no deletion
-      match /scans/{scanId} {
-        allow read:   if request.auth != null && request.auth.uid == uid;
-        allow create: if request.auth != null && request.auth.uid == uid;
-        allow update: if request.auth != null && request.auth.uid == uid;
-        allow delete: if false;
-      }
-
-      // Agent status subcollection — user reads, agent writes via Cloud Function
-      match /agent/{doc} {
+      // ── Per-device data ──────────────────────────────────────────────────
+      // Device document stores status summary + nickname (client can update nickname)
+      match /devices/{deviceId} {
         allow read:  if request.auth != null && request.auth.uid == uid;
-        allow write: if false; // only written by Cloud Functions (Admin SDK)
-      }
+        allow write: if request.auth != null && request.auth.uid == uid;
 
-      // Realtime heartbeat subcollection — user reads, agent writes via Cloud Function
-      match /realtime/{doc} {
-        allow read:  if request.auth != null && request.auth.uid == uid;
-        allow write: if false; // only written by Cloud Functions (Admin SDK)
-      }
+        // Full scan data
+        match /scans/{scanId} {
+          allow read:   if request.auth != null && request.auth.uid == uid;
+          allow create: if request.auth != null && request.auth.uid == uid;
+          allow update: if request.auth != null && request.auth.uid == uid;
+          allow delete: if false;
+        }
 
-      // Security summary subcollection — user reads, written by Cloud Functions
-      match /security/{doc} {
-        allow read:  if request.auth != null && request.auth.uid == uid;
-        allow write: if false; // only written by Cloud Functions (Admin SDK)
+        // Security summary — written by Cloud Functions only
+        match /security/{doc} {
+          allow read:  if request.auth != null && request.auth.uid == uid;
+          allow write: if false;
+        }
+
+        // Live CPU/RAM — written by Cloud Functions only
+        match /realtime/{doc} {
+          allow read:  if request.auth != null && request.auth.uid == uid;
+          allow write: if false;
+        }
       }
     }
 
-    // ── Agent tokens ───────────────────────────────────────────────────────
-    // Never readable or writable from the client.
-    // Created and validated only by Cloud Functions using Admin SDK.
+    // ── Agent tokens — never readable by clients ───────────────────────────
     match /agentTokens/{token} {
       allow read, write: if false;
     }

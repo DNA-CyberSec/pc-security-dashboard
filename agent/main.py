@@ -19,6 +19,7 @@ SAFETY: READ-ONLY — this agent never modifies any file or system setting.
 import os
 import sys
 import time
+import uuid
 import socket
 import logging
 import requests
@@ -39,6 +40,23 @@ AGENT_TOKEN     = os.getenv("AGENT_TOKEN", "")
 SCAN_INTERVAL   = int(os.getenv("SCAN_INTERVAL",       "300"))  # seconds
 HEARTBEAT_SECS  = int(os.getenv("HEARTBEAT_INTERVAL",  "60"))
 READ_ONLY       = True
+
+# Device identity — persisted in device_id.txt next to main.py
+_DEVICE_ID_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "device_id.txt")
+
+def _get_or_create_device_id():
+    if os.path.exists(_DEVICE_ID_FILE):
+        with open(_DEVICE_ID_FILE) as f:
+            did = f.read().strip()
+        if did:
+            return did
+    did = str(uuid.uuid4())
+    with open(_DEVICE_ID_FILE, "w") as f:
+        f.write(did)
+    return did
+
+DEVICE_ID   = _get_or_create_device_id()
+DEVICE_NAME = os.environ.get("COMPUTERNAME", socket.gethostname())
 
 FUNCTIONS_BASE     = "https://us-central1-pc-security-dashboard.cloudfunctions.net"
 HEARTBEAT_URL      = f"{FUNCTIONS_BASE}/agentHeartbeat"
@@ -66,10 +84,13 @@ def send_heartbeat():
     try:
         r = requests.post(HEARTBEAT_URL, json={
             "token":        AGENT_TOKEN,
+            "deviceId":     DEVICE_ID,
+            "deviceName":   DEVICE_NAME,
             "hostname":     socket.gethostname(),
             "username":     os.environ.get("USERNAME", "unknown"),
             "agentVersion": AGENT_VERSION,
             "readOnlyMode": READ_ONLY,
+            "os":           "Windows",
         }, timeout=REQUEST_TIMEOUT)
         if r.status_code == 200:
             log.debug("Heartbeat sent")
@@ -113,8 +134,9 @@ def run_scan():
 
     try:
         r = requests.post(SUBMIT_SCAN_URL, json={
-            "token": AGENT_TOKEN,
-            "scan":  scan,
+            "token":    AGENT_TOKEN,
+            "deviceId": DEVICE_ID,
+            "scan":     scan,
         }, timeout=REQUEST_TIMEOUT)
 
         if r.status_code == 200:
@@ -210,6 +232,7 @@ def main():
                 pass
             r = requests.post(REALTIME_URL, json={
                 "token":         AGENT_TOKEN,
+                "deviceId":      DEVICE_ID,
                 "cpu_percent":   round(cpu, 1),
                 "ram_percent":   round(mem.percent, 1),
                 "ram_used_gb":   round(mem.used  / 1e9, 2),

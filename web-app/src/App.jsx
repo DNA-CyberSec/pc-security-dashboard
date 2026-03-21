@@ -4,6 +4,7 @@ import { onAuthStateChanged } from "firebase/auth";
 import { auth } from "./firebase";
 import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
+import DeviceDashboard from "./pages/DeviceDashboard";
 import Report from "./pages/Report";
 import Setup from "./pages/Setup";
 import Footer from "./components/Footer";
@@ -37,6 +38,22 @@ export default function App() {
               element={
                 <ProtectedRoute user={user}>
                   <Dashboard user={user} />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/device/:deviceId"
+              element={
+                <ProtectedRoute user={user}>
+                  <DeviceDashboard user={user} />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/device/:deviceId/report"
+              element={
+                <ProtectedRoute user={user}>
+                  <Report user={user} />
                 </ProtectedRoute>
               }
             />

@@ -267,6 +267,19 @@ Firebase Console → Authentication → Sign-in method → Google → Enable
 
 ## Changelog
 
+### [1.0.0] — 2026-03-21
+**Step 10 complete: Multi-device adaptive dashboard — Grid View (1-5) + Command Center (6+)**
+- **Multi-device Firestore architecture**: all data now under `/users/{uid}/devices/{deviceId}/` — scans, realtime, security, status
+- **Agent deviceId**: each agent instance generates a persistent UUID on first run (saved to `config.json` / `device_id.txt`)
+- **Dashboard — Grid View** (≤5 devices): full device cards with 4 mini gauges (CPU/RAM/Disk/Health), security summary, firewall grade, temps, live flash on new data
+- **Dashboard — Command Center** (6+ devices): summary tiles (total/online/alerts/avg health), filter bar (All/Online/Offline/Alerts + search), sortable table with health bars and live CPU/RAM columns
+- **Auto-mode switching**: automatically selects Grid or Table based on device count; manual toggle button always visible
+- **Device nickname editing**: inline pencil → text field → save to Firestore — works in both grid and table view
+- **Single Device View** (`/device/:deviceId`): full gauges dashboard with breadcrumb "← All Devices / DEVICENAME", back to multi-device list
+- **Report page**: now reads from device-scoped Firestore path, passes `deviceId` to AI recommendations callable
+- **Fully bilingual**: all new strings added to `en.json` and `he.json` including RTL support
+- **Firestore rules**: new device-scoped rules — device doc writable by owner (for nickname), sub-collections (realtime/security) written only by Cloud Functions
+
 ### [0.1.0] — 2026-03-21
 **Initial release — project scaffold**
 - Full project structure created (web-app, agent, functions)

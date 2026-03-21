@@ -10,6 +10,7 @@ PyInstaller bundles this file + all modules into a single PCGuard-Setup.exe
 
 import sys
 import os
+import uuid
 
 # ── Constants shared by both modes ────────────────────────────────────────────
 
@@ -68,6 +69,19 @@ if BACKGROUND_MODE:
     SCAN_INTERVAL   = int(CONFIG.get("scan_interval",    300))
     HEARTBEAT_SECS  = int(CONFIG.get("heartbeat_interval", 60))
 
+    # Device identity — generated once and persisted in config.json
+    DEVICE_ID   = CONFIG.get("device_id", "")
+    DEVICE_NAME = os.environ.get("COMPUTERNAME", socket.gethostname())
+    if not DEVICE_ID:
+        DEVICE_ID = str(uuid.uuid4())
+        CONFIG["device_id"] = DEVICE_ID
+        try:
+            with open(CONFIG_FILE, "w") as f:
+                json.dump(CONFIG, f, indent=2)
+            log.info(f"Generated device ID: {DEVICE_ID}")
+        except Exception as e:
+            log.warning(f"Could not save device ID to config.json: {e}")
+
     # Events for inter-thread signalling
     _scan_now  = threading.Event()   # set by "Run Scan Now" tray menu item
     _stop      = threading.Event()   # set by "Exit" to stop the agent loop
@@ -83,10 +97,13 @@ if BACKGROUND_MODE:
     def send_heartbeat():
         status, _ = _post(HEARTBEAT_URL, {
             "token":        AGENT_TOKEN,
+            "deviceId":     DEVICE_ID,
+            "deviceName":   DEVICE_NAME,
             "hostname":     socket.gethostname(),
             "username":     os.environ.get("USERNAME", "unknown"),
             "agentVersion": AGENT_VERSION,
             "readOnlyMode": True,
+            "os":           "Windows",
         })
         if status == 401:
             log.error("Invalid AgentToken — reinstall PCGuard from pcguard-rami.web.app")
@@ -132,7 +149,7 @@ if BACKGROUND_MODE:
             "browserData":        _safe("browser",       PrivacyScanner().scan_browser_data),
         }
         scan["healthScore"] = _health_score(scan)
-        status, resp = _post(SUBMIT_SCAN_URL, {"token": AGENT_TOKEN, "scan": scan})
+        status, resp = _post(SUBMIT_SCAN_URL, {"token": AGENT_TOKEN, "deviceId": DEVICE_ID, "scan": scan})
         if status == 200:
             log.info(f"Scan uploaded → {resp.get('scanId', '?')}  score={scan['healthScore']}")
         elif status == 401:
@@ -171,6 +188,7 @@ if BACKGROUND_MODE:
 
             _post(REALTIME_URL, {
                 "token":        AGENT_TOKEN,
+                "deviceId":     DEVICE_ID,
                 "cpu_percent":  round(cpu, 1),
                 "ram_percent":  round(mem.percent, 1),
                 "ram_used_gb":  round(mem.used  / 1e9, 2),

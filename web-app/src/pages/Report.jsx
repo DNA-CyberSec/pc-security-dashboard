@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useNavigate, useLocation } from "react-router-dom";
+import { useNavigate, useLocation, useParams } from "react-router-dom";
 import {
   collection,
   query,
@@ -19,6 +19,8 @@ export default function Report({ user }) {
   const location = useLocation();
   const isRTL = i18n.language === "he";
 
+  const { deviceId: paramDeviceId } = useParams();
+  const deviceId = paramDeviceId || location.state?.deviceId || "default";
   const defaultTab = location.state?.tab === "security" ? "security" : "overview";
   const [activeTab, setActiveTab] = useState(defaultTab);
   const [scan, setScan] = useState(null);
@@ -37,7 +39,7 @@ export default function Report({ user }) {
   const loadLatestReport = async () => {
     try {
       const q = query(
-        collection(db, "users", user.uid, "scans"),
+        collection(db, "users", user.uid, "devices", deviceId, "scans"),
         orderBy("createdAt", "desc"),
         limit(1)
       );
@@ -48,7 +50,7 @@ export default function Report({ user }) {
         await loadAiRecommendations(data.id);
       }
       // Load security summary
-      const secSnap = await getDoc(doc(db, "users", user.uid, "security", "current"));
+      const secSnap = await getDoc(doc(db, "users", user.uid, "devices", deviceId, "security", "current"));
       if (secSnap.exists()) setSecurityData(secSnap.data());
     } catch (err) {
       console.error("Report load error:", err);
@@ -60,7 +62,7 @@ export default function Report({ user }) {
   const loadAiRecommendations = async (scanId) => {
     try {
       const getRecommendations = httpsCallable(functions, "getScanRecommendations");
-      const result = await getRecommendations({ scanId });
+      const result = await getRecommendations({ scanId, deviceId });
       setAiRecommendations(result.data.recommendations);
     } catch (err) {
       console.error("AI recommendations error:", err);
@@ -148,7 +150,10 @@ export default function Report({ user }) {
     <div dir={isRTL ? "rtl" : "ltr"} style={styles.container}>
       {/* Header */}
       <header style={styles.header}>
-        <button onClick={() => navigate("/dashboard")} style={styles.backBtn}>
+        <button
+          onClick={() => navigate(deviceId !== "default" ? `/device/${deviceId}` : "/dashboard")}
+          style={styles.backBtn}
+        >
           ← {t("common.back")}
         </button>
         <h1 style={styles.title}>{t("report.title")}</h1>
