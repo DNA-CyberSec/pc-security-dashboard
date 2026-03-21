@@ -34,15 +34,19 @@ if BACKGROUND_MODE:
     import time
     import socket
     import logging
+    import threading
+    import webbrowser
     import requests
     import schedule
+    import pystray
+    from PIL import Image, ImageDraw
 
     from modules.scanner   import Scanner
     from modules.processes import ProcessScanner
     from modules.network   import NetworkScanner
     from modules.privacy   import PrivacyScanner
 
-    # Set up logging to file (no console window in background mode)
+    # Set up logging to file only — no console in background mode
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(message)s",
@@ -62,6 +66,10 @@ if BACKGROUND_MODE:
     AGENT_TOKEN     = CONFIG.get("agent_token", "")
     SCAN_INTERVAL   = int(CONFIG.get("scan_interval",    300))
     HEARTBEAT_SECS  = int(CONFIG.get("heartbeat_interval", 60))
+
+    # Events for inter-thread signalling
+    _scan_now  = threading.Event()   # set by "Run Scan Now" tray menu item
+    _stop      = threading.Event()   # set by "Exit" to stop the agent loop
 
     def _post(url, payload, timeout=30):
         try:
@@ -128,15 +136,59 @@ if BACKGROUND_MODE:
         else:
             log.error(f"Scan upload failed: HTTP {status}")
 
-    # Run immediately then schedule
-    send_heartbeat()
-    run_scan()
-    schedule.every(HEARTBEAT_SECS).seconds.do(send_heartbeat)
-    schedule.every(SCAN_INTERVAL).seconds.do(run_scan)
-    log.info(f"PCGuard v{AGENT_VERSION} running (heartbeat={HEARTBEAT_SECS}s, scan={SCAN_INTERVAL}s)")
-    while True:
-        schedule.run_pending()
-        time.sleep(1)
+    def _agent_loop():
+        """Runs in a background thread — heartbeat + scheduled scans."""
+        send_heartbeat()
+        run_scan()
+        schedule.every(HEARTBEAT_SECS).seconds.do(send_heartbeat)
+        schedule.every(SCAN_INTERVAL).seconds.do(run_scan)
+        log.info(f"PCGuard v{AGENT_VERSION} running (heartbeat={HEARTBEAT_SECS}s, scan={SCAN_INTERVAL}s)")
+        while not _stop.is_set():
+            if _scan_now.is_set():
+                _scan_now.clear()
+                run_scan()
+            schedule.run_pending()
+            time.sleep(1)
+
+    # ── System tray icon ──────────────────────────────────────────────────────
+
+    def _make_icon_image():
+        """Draw a simple shield icon using PIL."""
+        size = 64
+        img  = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+        d    = ImageDraw.Draw(img)
+        # Outer shield (blue)
+        shield = [(8, 4), (56, 4), (56, 40), (32, 60), (8, 40)]
+        d.polygon(shield, fill=(30, 110, 235, 255))
+        # Inner highlight (lighter blue)
+        inner = [(14, 10), (50, 10), (50, 38), (32, 54), (14, 38)]
+        d.polygon(inner, fill=(80, 160, 255, 255))
+        # Small white checkmark
+        d.line([(22, 32), (29, 40), (42, 24)], fill=(255, 255, 255, 255), width=4)
+        return img
+
+    def _on_open_dashboard(icon, item):
+        webbrowser.open("https://pcguard-rami.web.app")
+
+    def _on_run_scan(icon, item):
+        _scan_now.set()
+
+    def _on_exit(icon, item):
+        _stop.set()
+        icon.stop()
+
+    # Start agent loop in background thread (pystray must own the main thread)
+    threading.Thread(target=_agent_loop, daemon=True).start()
+
+    tray_menu = pystray.Menu(
+        pystray.MenuItem("PC Guard is running", None, enabled=False),
+        pystray.Menu.SEPARATOR,
+        pystray.MenuItem("Open Dashboard", _on_open_dashboard),
+        pystray.MenuItem("Run Scan Now",   _on_run_scan),
+        pystray.MenuItem("Exit PC Guard",  _on_exit),
+    )
+    tray = pystray.Icon("PCGuard", _make_icon_image(), "PC Guard", tray_menu)
+    tray.run()   # blocks main thread until exit
 
 else:
     # ── GUI INSTALLER MODE ────────────────────────────────────────────────────

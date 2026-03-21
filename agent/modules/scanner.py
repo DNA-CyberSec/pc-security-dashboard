@@ -207,6 +207,8 @@ class Scanner:
 
     def scan_vulnerabilities(self) -> list:
         issues = []
+        # CREATE_NO_WINDOW prevents black console popups when running as a windowed .exe
+        _NO_WIN = subprocess.CREATE_NO_WINDOW
 
         # Windows Defender status
         try:
@@ -214,7 +216,8 @@ class Scanner:
                 ["powershell", "-NoProfile", "-Command",
                  "Get-MpComputerStatus | Select-Object AntivirusEnabled,RealTimeProtectionEnabled,"
                  "AntivirusSignatureAge,NISSignatureAge | ConvertTo-Json"],
-                capture_output=True, text=True, timeout=15
+                capture_output=True, text=True, timeout=15,
+                creationflags=_NO_WIN,
             )
             if r.returncode == 0 and r.stdout.strip():
                 s = json.loads(r.stdout)
@@ -236,7 +239,8 @@ class Scanner:
             r = subprocess.run(
                 ["powershell", "-NoProfile", "-Command",
                  "Get-NetFirewallProfile | Select-Object Name,Enabled | ConvertTo-Json"],
-                capture_output=True, text=True, timeout=10
+                capture_output=True, text=True, timeout=10,
+                creationflags=_NO_WIN,
             )
             if r.returncode == 0 and r.stdout.strip():
                 profiles = json.loads(r.stdout)
@@ -270,7 +274,8 @@ class Scanner:
                 ["powershell", "-NoProfile", "-Command",
                  "(New-Object -ComObject Microsoft.Update.Session)"
                  ".CreateUpdateSearcher().Search('IsInstalled=0').Updates.Count"],
-                capture_output=True, text=True, timeout=30
+                capture_output=True, text=True, timeout=30,
+                creationflags=_NO_WIN,
             )
             if r.returncode == 0:
                 count = int(r.stdout.strip())

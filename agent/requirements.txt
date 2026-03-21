@@ -3,4 +3,6 @@ python-dotenv==1.0.1
 requests==2.31.0
 schedule==1.2.1
 send2trash==1.8.3
+pystray==0.19.5
+Pillow==10.3.0
 pyinstaller==6.5.0

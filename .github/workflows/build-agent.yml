@@ -38,6 +38,11 @@ jobs:
             --hidden-import=schedule `
             --hidden-import=dotenv `
             --hidden-import=winreg `
+            --hidden-import=pystray `
+            --hidden-import=pystray._win32 `
+            --hidden-import=PIL `
+            --hidden-import=PIL.Image `
+            --hidden-import=PIL.ImageDraw `
             --hidden-import=modules.scanner `
             --hidden-import=modules.processes `
             --hidden-import=modules.network `
