@@ -44,10 +44,11 @@ if BACKGROUND_MODE:
     import pystray
     from PIL import Image, ImageDraw
 
-    from modules.scanner   import Scanner
-    from modules.processes import ProcessScanner
-    from modules.network   import NetworkScanner
-    from modules.privacy   import PrivacyScanner
+    from modules.scanner      import Scanner
+    from modules.processes    import ProcessScanner
+    from modules.network      import NetworkScanner
+    from modules.privacy      import PrivacyScanner
+    from modules.network_info import NetworkInfo
 
     # Set up logging to file only — no console in background mode
     logging.basicConfig(
@@ -165,6 +166,10 @@ if BACKGROUND_MODE:
         sus_p = sum(1 for p in scan.get("processes", []) if p.get("suspicious"))
         score -= 15 if sus_p >= 3 else (8 if sus_p >= 1 else 0)
         score -= min(sum(5 for c in scan.get("networkConnections", []) if c.get("suspicious")), 20)
+        net = scan.get("networkInfo", {})
+        if net.get("rdp_enabled"):
+            score -= 5
+        score -= min(sum(15 for pp in net.get("open_ports", []) if pp.get("dangerous")), 30)
         return max(0, min(100, score))
 
     def run_scan():
@@ -184,6 +189,7 @@ if BACKGROUND_MODE:
             "processes":          _safe("processes",     ProcessScanner().scan_processes),
             "networkConnections": _safe("network",       NetworkScanner().scan_connections),
             "browserData":        _safe("browser",       PrivacyScanner().scan_browser_data),
+            "networkInfo":        _safe("network_info",  NetworkInfo().collect_full),
         }
         scan["healthScore"] = _health_score(scan)
         status, resp = _post(SUBMIT_SCAN_URL, {"token": AGENT_TOKEN, "deviceId": DEVICE_ID, "scan": scan})
@@ -194,8 +200,11 @@ if BACKGROUND_MODE:
         else:
             log.error(f"Scan upload failed: HTTP {status}")
 
+    _net_cache     = {}
+    _net_last_time = [0.0]   # list so inner function can mutate it
+
     def send_realtime_heartbeat():
-        """Lightweight 10-second heartbeat with CPU/RAM/processes/temps."""
+        """Lightweight 10-second heartbeat with CPU/RAM/processes/temps/network."""
         try:
             cpu = psutil.cpu_percent(interval=0.1)
             mem = psutil.virtual_memory()
@@ -223,15 +232,25 @@ if BACKGROUND_MODE:
             except Exception:
                 pass
 
+            # Refresh network info every 30 seconds
+            if time.time() - _net_last_time[0] >= 30:
+                try:
+                    _net_cache.clear()
+                    _net_cache.update(NetworkInfo().collect_heartbeat())
+                    _net_last_time[0] = time.time()
+                except Exception as ne:
+                    log.debug(f"Network info error: {ne}")
+
             _post(REALTIME_URL, {
-                "token":        AGENT_TOKEN,
-                "deviceId":     DEVICE_ID,
-                "cpu_percent":  round(cpu, 1),
-                "ram_percent":  round(mem.percent, 1),
-                "ram_used_gb":  round(mem.used  / 1e9, 2),
-                "ram_total_gb": round(mem.total / 1e9, 2),
+                "token":         AGENT_TOKEN,
+                "deviceId":      DEVICE_ID,
+                "cpu_percent":   round(cpu, 1),
+                "ram_percent":   round(mem.percent, 1),
+                "ram_used_gb":   round(mem.used  / 1e9, 2),
+                "ram_total_gb":  round(mem.total / 1e9, 2),
                 "top_processes": top5,
                 "temperatures":  temps,
+                "network":       dict(_net_cache) if _net_cache else None,
             })
         except Exception as e:
             log.debug(f"Realtime heartbeat error: {e}")

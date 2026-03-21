@@ -110,6 +110,193 @@ function formatAgo(ts, t) {
   return date.toLocaleDateString();
 }
 
+// ── Latency Bar Chart ─────────────────────────────────────────────────────────
+
+function LatencyChart({ history }) {
+  if (!history || history.length === 0) return null;
+  const max    = Math.max(...history.map(h => h.latency_ms || 0), 200);
+  const W      = 260, H = 80, barW = 20, gap = 6;
+  const total  = history.length;
+  const startX = W - total * (barW + gap) + gap;
+
+  return (
+    <svg width={W} height={H} style={{ overflow: "visible" }}>
+      {history.map((h, i) => {
+        const x    = startX + i * (barW + gap);
+        const pct  = h.connected && h.latency_ms != null ? Math.min(h.latency_ms / max, 1) : 1;
+        const barH = Math.max(4, pct * (H - 16));
+        const y    = H - barH;
+        const color = !h.connected ? "#4a5568"
+          : h.latency_ms < 50  ? "#48bb78"
+          : h.latency_ms < 150 ? "#f6ad55"
+          : "#fc8181";
+        return (
+          <g key={i}>
+            <rect x={x} y={y} width={barW} height={barH} rx={3} fill={color} opacity={0.85} />
+            {i === total - 1 && h.latency_ms != null && (
+              <text x={x + barW / 2} y={y - 4} textAnchor="middle"
+                fill={color} fontSize={9} fontWeight={700}>
+                {h.latency_ms}
+              </text>
+            )}
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
+// ── Network Tab ───────────────────────────────────────────────────────────────
+
+function NetworkTab({ networkData, t }) {
+  const net = networkData;
+
+  if (!net) {
+    return (
+      <div style={{ padding: "40px 0", textAlign: "center", color: "#4a5568" }}>
+        {t("network.noNetworkData")}
+      </div>
+    );
+  }
+
+  const openPorts = net.open_ports || [];
+
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16, marginBottom: 24 }}>
+
+      {/* Connection status + latency history */}
+      <div style={s.infoCard}>
+        <p style={s.cardTitle}>{t("network.title")}</p>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
+          <span style={{ fontSize: 24 }}>{net.connected ? "🌐" : "🔌"}</span>
+          <div>
+            <p style={{ ...s.bigVal, color: net.connected ? "#48bb78" : "#fc8181", marginBottom: 2 }}>
+              {net.connected ? t("network.connected") : t("network.disconnected")}
+            </p>
+            {net.latency_ms != null && (
+              <p style={{ ...s.muted, fontSize: 14 }}>
+                {net.latency_ms}{t("network.ms")} {t("network.latency")}
+              </p>
+            )}
+          </div>
+        </div>
+        {net.network_name && (
+          <p style={s.muted}>{t("network.networkName")}: <span style={{ color: "#c9d1d9" }}>{net.network_name}</span></p>
+        )}
+        <div style={{ marginTop: 14 }}>
+          <p style={{ ...s.cardTitle, marginBottom: 8 }}>{t("network.latencyHistory")}</p>
+          <LatencyChart history={net.latency_history} />
+        </div>
+      </div>
+
+      {/* IP addresses */}
+      <div style={s.infoCard}>
+        <p style={s.cardTitle}>IP</p>
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <div>
+            <p style={s.muted}>{t("network.localIP")}</p>
+            <p style={{ ...s.bigVal, fontSize: 15, fontFamily: "monospace", color: "#58a6ff" }}>
+              {net.local_ip || "—"}
+            </p>
+          </div>
+          <div>
+            <p style={s.muted}>{t("network.publicIP")}</p>
+            <p style={{ ...s.bigVal, fontSize: 15, fontFamily: "monospace", color: "#58a6ff" }}>
+              {net.public_ip || "—"}
+            </p>
+          </div>
+        </div>
+
+        {/* RDP / SSH */}
+        <div style={{ marginTop: 16, display: "flex", flexDirection: "column", gap: 10 }}>
+          <div style={{
+            padding: "10px 14px", borderRadius: 8,
+            background: net.rdp_enabled ? "#2d2008" : "#0d2818",
+            border: `1px solid ${net.rdp_enabled ? "#7d4f00" : "#238636"}`,
+          }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+              <span style={{ fontWeight: 700, fontSize: 13, color: net.rdp_enabled ? "#f6ad55" : "#56d364" }}>
+                {t("network.rdp")}
+              </span>
+              <span style={{ fontSize: 12, fontWeight: 700, color: net.rdp_enabled ? "#ed8936" : "#48bb78" }}>
+                {net.rdp_enabled ? "ON" : "OFF"}
+              </span>
+            </div>
+            {net.rdp_enabled && (
+              <p style={{ fontSize: 11, color: "#8b949e", margin: 0, lineHeight: 1.5 }}>
+                {t("network.rdpWarning")}
+              </p>
+            )}
+          </div>
+
+          <div style={{
+            padding: "10px 14px", borderRadius: 8,
+            background: net.ssh_enabled ? "#2d2008" : "#0d1117",
+            border: `1px solid ${net.ssh_enabled ? "#7d4f00" : "#21262d"}`,
+          }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+              <span style={{ fontWeight: 700, fontSize: 13, color: net.ssh_enabled ? "#f6ad55" : "#8b949e" }}>
+                {t("network.ssh")}
+              </span>
+              <span style={{ fontSize: 12, fontWeight: 700, color: net.ssh_enabled ? "#ed8936" : "#4a5568" }}>
+                {net.ssh_enabled ? "ON" : "OFF"}
+              </span>
+            </div>
+            {net.ssh_enabled && (
+              <p style={{ fontSize: 11, color: "#8b949e", margin: 0, lineHeight: 1.5 }}>
+                {t("network.sshInfo")}
+              </p>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Open ports */}
+      <div style={s.infoCard}>
+        <p style={s.cardTitle}>{t("network.openPorts")} ({openPorts.length})</p>
+        {openPorts.length === 0 ? (
+          <p style={s.muted}>{t("network.noOpenPorts")}</p>
+        ) : (
+          <table style={s.procTable}>
+            <thead>
+              <tr>
+                <th style={s.th}>{t("network.port")}</th>
+                <th style={s.th}>{t("network.protocol")}</th>
+                <th style={s.th}>{t("network.process")}</th>
+                <th style={{ ...s.th, textAlign: "right" }}>{t("network.risk")}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {openPorts.map((p, i) => (
+                <tr key={i} style={p.dangerous ? { background: "rgba(252,129,129,0.05)" } : {}}>
+                  <td style={{ ...s.td, fontFamily: "monospace", color: p.dangerous ? "#fc8181" : "#c9d1d9" }}>
+                    {p.port}
+                  </td>
+                  <td style={{ ...s.td, color: "#8b949e" }}>{p.protocol}</td>
+                  <td style={{ ...s.td, color: "#8b949e", maxWidth: 80 }}>
+                    {p.process?.replace(".exe", "") || "—"}
+                  </td>
+                  <td style={{ ...s.td, textAlign: "right" }}>
+                    <span style={{
+                      fontSize: 10, fontWeight: 700, padding: "1px 6px", borderRadius: 4,
+                      background: p.dangerous ? "#2d1b1b" : "#0d2818",
+                      color:      p.dangerous ? "#fc8181" : "#56d364",
+                      border:     `1px solid ${p.dangerous ? "#742a2a" : "#238636"}`,
+                    }}>
+                      {p.dangerous ? t("network.riskDangerous") : t("network.riskNormal")}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+    </div>
+  );
+}
+
 // ── DeviceDashboard ───────────────────────────────────────────────────────────
 
 export default function DeviceDashboard({ user }) {
@@ -120,12 +307,15 @@ export default function DeviceDashboard({ user }) {
 
   const [deviceDoc,     setDeviceDoc]     = useState(null);
   const [realtimeData,  setRealtimeData]  = useState(null);
+  const [networkData,   setNetworkData]   = useState(null);
   const [latestScan,    setLatestScan]    = useState(null);
   const [loading,       setLoading]       = useState(true);
   const [editingName,   setEditingName]   = useState(false);
   const [nicknameInput, setNicknameInput] = useState("");
+  const [activeTab,     setActiveTab]     = useState("overview"); // "overview" | "network"
 
   const realtimeUnsubRef = useRef(null);
+  const networkUnsubRef  = useRef(null);
   const lastScanIdRef    = useRef(null);
 
   // Load scan by ID
@@ -177,6 +367,31 @@ export default function DeviceDashboard({ user }) {
       unsubscribeRealtime();
     };
   }, [subscribeRealtime, unsubscribeRealtime]);
+
+  // Network subscription — visibility-aware
+  const subscribeNetwork = useCallback(() => {
+    if (networkUnsubRef.current || document.hidden) return;
+    networkUnsubRef.current = onSnapshot(
+      doc(db, "users", user.uid, "devices", deviceId, "network", "current"),
+      (snap) => { if (snap.exists()) setNetworkData(snap.data()); },
+    );
+  }, [user.uid, deviceId]);
+
+  const unsubscribeNetwork = useCallback(() => {
+    networkUnsubRef.current?.();
+    networkUnsubRef.current = null;
+  }, []);
+
+  useEffect(() => {
+    subscribeNetwork();
+    const onVisibility = () =>
+      document.hidden ? unsubscribeNetwork() : subscribeNetwork();
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      unsubscribeNetwork();
+    };
+  }, [subscribeNetwork, unsubscribeNetwork]);
 
   const saveNickname = async () => {
     const nickname = nicknameInput.trim();
@@ -314,6 +529,19 @@ export default function DeviceDashboard({ user }) {
           </div>
         )}
 
+        {/* ── Tab bar ───────────────────────────────────────────────────── */}
+        <div style={s.tabBar}>
+          {["overview", "network"].map(tab => (
+            <button
+              key={tab}
+              onClick={() => setActiveTab(tab)}
+              style={{ ...s.tabBtn, ...(activeTab === tab ? s.tabBtnActive : {}) }}
+            >
+              {tab === "overview" ? `📊 ${t("report.tabs.overview")}` : `🌐 ${t("network.title")}`}
+            </button>
+          ))}
+        </div>
+
         {/* ── ROW 1: Gauges ─────────────────────────────────────────────── */}
         <div style={s.gaugeRow}>
           <div style={s.gaugeCard}>
@@ -338,8 +566,11 @@ export default function DeviceDashboard({ user }) {
           </div>
         </div>
 
-        {/* ── ROW 2: Info cards ─────────────────────────────────────────── */}
-        <div style={s.cardRow}>
+        {/* ── ROW 2: Info cards (Overview tab) ──────────────────────────── */}
+        {activeTab === "network" ? (
+          <NetworkTab networkData={networkData} t={t} />
+        ) : null}
+        <div style={{ ...s.cardRow, display: activeTab === "overview" ? s.cardRow.display : "none" }}>
 
           {/* Top Processes */}
           <div style={s.infoCard}>
@@ -580,4 +811,20 @@ const s = {
     fontSize: 13, fontWeight: 600, whiteSpace: "nowrap",
   },
   countdownBox: { marginTop: 12, paddingTop: 12, borderTop: "1px solid #21262d" },
+
+  // Tab bar
+  tabBar: {
+    display: "flex", gap: 4, marginBottom: 16,
+    borderBottom: "1px solid #21262d", paddingBottom: 0,
+  },
+  tabBtn: {
+    background: "transparent", border: "none", color: "#8b949e",
+    padding: "8px 16px", cursor: "pointer", fontSize: 13, fontWeight: 500,
+    borderBottom: "2px solid transparent", marginBottom: -1,
+    borderRadius: "6px 6px 0 0",
+  },
+  tabBtnActive: {
+    color: "#e2e8f0", borderBottomColor: "#58a6ff",
+    background: "#161b22",
+  },
 };

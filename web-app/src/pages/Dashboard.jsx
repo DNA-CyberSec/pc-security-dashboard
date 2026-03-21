@@ -193,6 +193,37 @@ function DeviceCard({ device, rt, online, onView, onEditNickname, t, isRTL }) {
         </div>
       )}
 
+      {/* Network section */}
+      {device.network_connected !== undefined && device.network_connected !== null && (
+        <div style={{ ...s.cardSection, flexWrap: "wrap", gap: 4 }}>
+          <span style={{ fontSize: 12, color: device.network_connected ? "#56d364" : "#fc8181" }}>
+            {device.network_connected ? "🌐" : "🔌"}{" "}
+            {device.network_connected ? t("network.connected") : t("network.disconnected")}
+            {device.network_latency_ms != null && ` · ${device.network_latency_ms}${t("network.ms")}`}
+          </span>
+          {device.network_local_ip && (
+            <span style={{ fontSize: 11, color: "#8b949e" }}>{device.network_local_ip}</span>
+          )}
+          {device.network_rdp_enabled && (
+            <span style={{ fontSize: 11, color: "#ed8936", background: "#2d2008",
+                           border: "1px solid #7d4f00", borderRadius: 4, padding: "1px 5px" }}>
+              RDP
+            </span>
+          )}
+          {device.network_ssh_enabled && (
+            <span style={{ fontSize: 11, color: "#f6ad55", background: "#2d2008",
+                           border: "1px solid #7d4f00", borderRadius: 4, padding: "1px 5px" }}>
+              SSH
+            </span>
+          )}
+          {(device.network_dangerous_ports || 0) > 0 && (
+            <span style={{ fontSize: 11, color: "#fc8181" }}>
+              ⚠️ {device.network_dangerous_ports} {t("network.dangerousPorts")}
+            </span>
+          )}
+        </div>
+      )}
+
       {/* View button */}
       <button
         onClick={e => { e.stopPropagation(); onView(); }}

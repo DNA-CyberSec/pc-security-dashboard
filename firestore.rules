@@ -31,6 +31,12 @@ service cloud.firestore {
           allow read:  if request.auth != null && request.auth.uid == uid;
           allow write: if false;
         }
+
+        // Network status — written by Cloud Functions only
+        match /network/{doc} {
+          allow read:  if request.auth != null && request.auth.uid == uid;
+          allow write: if false;
+        }
       }
     }
 

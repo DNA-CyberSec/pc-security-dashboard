@@ -27,10 +27,11 @@ import schedule
 import winreg
 from dotenv import load_dotenv
 
-from modules.scanner   import Scanner
-from modules.processes import ProcessScanner
-from modules.network   import NetworkScanner
-from modules.privacy   import PrivacyScanner
+from modules.scanner      import Scanner
+from modules.processes    import ProcessScanner
+from modules.network      import NetworkScanner
+from modules.privacy      import PrivacyScanner
+from modules.network_info import NetworkInfo
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
@@ -162,6 +163,7 @@ def run_scan():
         "processes":         _safe("processes",       ProcessScanner().scan_processes),
         "networkConnections":_safe("network",         NetworkScanner().scan_connections),
         "browserData":       _safe("browser",         PrivacyScanner().scan_browser_data),
+        "networkInfo":       _safe("network_info",    NetworkInfo().collect_full),
     }
 
     scan["healthScore"] = _health_score(scan)
@@ -222,7 +224,18 @@ def _health_score(scan: dict) -> int:
     suspicious_conns = sum(1 for c in scan.get("networkConnections", []) if c.get("suspicious"))
     score -= min(suspicious_conns * 5, 20)
 
+    net = scan.get("networkInfo", {})
+    if net.get("rdp_enabled"):
+        score -= 5
+    dangerous_ports = sum(1 for p in net.get("open_ports", []) if p.get("dangerous"))
+    score -= min(dangerous_ports * 15, 30)
+
     return max(0, min(100, score))
+
+# ── Network cache (refreshed every 30s inside realtime heartbeat) ─────────────
+
+_net_cache     = {}
+_net_last_time = 0.0
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 
@@ -241,6 +254,7 @@ def main():
         sys.exit(1)
 
     def send_realtime_heartbeat():
+        global _net_cache, _net_last_time
         try:
             cpu = psutil.cpu_percent(interval=0.1)
             mem = psutil.virtual_memory()
@@ -265,6 +279,13 @@ def main():
                     temps = temps[:8]
             except Exception:
                 pass
+            # Refresh network info every 30 seconds
+            if time.time() - _net_last_time >= 30:
+                try:
+                    _net_cache     = NetworkInfo().collect_heartbeat()
+                    _net_last_time = time.time()
+                except Exception as e:
+                    log.debug(f"Network info error: {e}")
             r = requests.post(REALTIME_URL, json={
                 "token":         AGENT_TOKEN,
                 "deviceId":      DEVICE_ID,
@@ -274,6 +295,7 @@ def main():
                 "ram_total_gb":  round(mem.total / 1e9, 2),
                 "top_processes": top5,
                 "temperatures":  temps,
+                "network":       _net_cache or None,
             }, timeout=10)
             if r.status_code != 200:
                 log.debug(f"Realtime heartbeat: {r.status_code}")

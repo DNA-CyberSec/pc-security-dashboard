@@ -166,6 +166,10 @@ exports.submitScan = onRequest(async (req, res) => {
   const suspiciousCount = malwareSuspects.filter(m => m.severity === "warning").length
                         + startupSecurity.filter(s => s.category === "suspicious").length;
 
+  // Network fields from full scan (overwrite what realtimeHeartbeat already set)
+  const netInfo         = scan.networkInfo || {};
+  const netDangerPorts  = (netInfo.open_ports || []).filter(p => p.dangerous).length;
+
   // Update device document with compact summary (used for multi-device listing)
   await deviceRef.set({
     lastScanAt:             admin.firestore.FieldValue.serverTimestamp(),
@@ -178,6 +182,15 @@ exports.submitScan = onRequest(async (req, res) => {
     suspiciousCount,
     firewallGrade:          firewallStatus.grade ?? null,
     storage:                scan.storage || [],
+    // Network compact fields (from scan's full networkInfo)
+    ...(Object.keys(netInfo).length > 0 && {
+      network_connected:       netInfo.connected      ?? null,
+      network_latency_ms:      netInfo.latency_ms     ?? null,
+      network_local_ip:        netInfo.local_ip       ?? null,
+      network_rdp_enabled:     netInfo.rdp_enabled    ?? false,
+      network_ssh_enabled:     netInfo.ssh_enabled    ?? false,
+      network_dangerous_ports: netDangerPorts,
+    }),
   }, { merge: true });
 
   // Write security sub-doc
@@ -203,32 +216,68 @@ exports.realtimeHeartbeat = onRequest(async (req, res) => {
   if (req.method !== "POST")    { res.status(405).json({ error: "POST required" }); return; }
 
   const { token, deviceId, cpu_percent, ram_percent, ram_used_gb, ram_total_gb,
-          top_processes, temperatures } = req.body;
+          top_processes, temperatures, network } = req.body;
 
   const uid = await resolveToken(token);
   if (!uid) return res.status(401).json({ error: "Invalid or unknown AgentToken" });
 
-  const did = sanitizeDeviceId(deviceId);
+  const did       = sanitizeDeviceId(deviceId);
+  const deviceRef = db.collection("users").doc(uid).collection("devices").doc(did);
+  const now       = admin.firestore.FieldValue.serverTimestamp();
 
-  const now = admin.firestore.FieldValue.serverTimestamp();
-
-  await db.collection("users").doc(uid)
-    .collection("devices").doc(did)
-    .collection("realtime").doc("current")
-    .set({
-      cpu_percent:   cpu_percent   ?? null,
-      ram_percent:   ram_percent   ?? null,
-      ram_used_gb:   ram_used_gb   ?? null,
-      ram_total_gb:  ram_total_gb  ?? null,
-      top_processes: top_processes ?? [],
-      temperatures:  temperatures  ?? [],
-      updatedAt:     now,
-    });
+  await deviceRef.collection("realtime").doc("current").set({
+    cpu_percent:   cpu_percent   ?? null,
+    ram_percent:   ram_percent   ?? null,
+    ram_used_gb:   ram_used_gb   ?? null,
+    ram_total_gb:  ram_total_gb  ?? null,
+    top_processes: top_processes ?? [],
+    temperatures:  temperatures  ?? [],
+    updatedAt:     now,
+  });
 
   // Keep device online status fresh
-  await db.collection("users").doc(uid)
-    .collection("devices").doc(did)
-    .set({ last_seen: now, online: true }, { merge: true });
+  const deviceUpdate = { last_seen: now, online: true };
+
+  // Handle network data
+  if (network && typeof network === "object") {
+    const netRef   = deviceRef.collection("network").doc("current");
+    const netSnap  = await netRef.get();
+    const prevHist = netSnap.exists ? (netSnap.data().latency_history || []) : [];
+
+    // Append new latency entry (epoch ms, not serverTimestamp — can't use that in arrays)
+    const newEntry = {
+      t:          Date.now(),
+      latency_ms: network.latency_ms ?? null,
+      connected:  network.connected  ?? false,
+    };
+    const latency_history = [...prevHist, newEntry].slice(-10);
+
+    await netRef.set({
+      connected:       network.connected    ?? null,
+      latency_ms:      network.latency_ms   ?? null,
+      local_ip:        network.local_ip     ?? null,
+      public_ip:       network.public_ip    ?? null,
+      network_name:    network.network_name ?? null,
+      rdp_enabled:     network.rdp_enabled  ?? false,
+      ssh_enabled:     network.ssh_enabled  ?? false,
+      open_ports:      network.open_ports   ?? [],
+      latency_history,
+      updatedAt:       now,
+    }, { merge: true });
+
+    // Mirror compact fields to device doc for fast listing
+    const dangerousPorts = (network.open_ports || []).filter(p => p.dangerous).length;
+    Object.assign(deviceUpdate, {
+      network_connected:      network.connected    ?? null,
+      network_latency_ms:     network.latency_ms   ?? null,
+      network_local_ip:       network.local_ip     ?? null,
+      network_rdp_enabled:    network.rdp_enabled  ?? false,
+      network_ssh_enabled:    network.ssh_enabled  ?? false,
+      network_dangerous_ports: dangerousPorts,
+    });
+  }
+
+  await deviceRef.set(deviceUpdate, { merge: true });
 
   res.json({ ok: true });
 });
