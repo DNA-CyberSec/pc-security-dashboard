@@ -281,9 +281,9 @@ Firebase Console → Authentication → Sign-in method → Google → Enable
 
 ### [0.2.0] — 2026-03-21
 **Step 1 complete: Project structure created + Firebase connected**
-- Firebase project `pc-security-dashboard` (project number: 557070398394) linked
-- Web app registered (App ID: `1:557070398394:web:f628b91f96c32784c5a383`)
-- `web-app/.env` populated with real Firebase config
+- Firebase project `pc-security-dashboard` linked
+- Web app registered and configured
+- `web-app/.env` populated with real Firebase config (gitignored)
 - `.firebaserc` updated with correct project ID
 - Firestore database created (us-central1, Native mode)
 - Firestore security rules deployed — users can only access their own data
