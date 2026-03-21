@@ -23,7 +23,7 @@ jobs:
       - name: Install dependencies
         run: |
           cd web-app
-          npm ci
+          npm install --legacy-peer-deps
 
       - name: Build React app
         env:
