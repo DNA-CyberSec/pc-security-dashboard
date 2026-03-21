@@ -1,6 +1,7 @@
 import React from "react";
 
-const VERSION = process.env.REACT_APP_VERSION || require("../../package.json").version;
+import pkg from "../../package.json";
+const VERSION = pkg.version;
 
 export default function Footer() {
   return (
