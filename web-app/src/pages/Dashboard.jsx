@@ -5,7 +5,6 @@ import { signOut } from "firebase/auth";
 import {
   collection,
   query,
-  where,
   orderBy,
   limit,
   getDocs,
@@ -30,27 +29,22 @@ export default function Dashboard({ user }) {
 
   const loadDashboardData = async () => {
     try {
-      // Load latest scan
-      const scansRef = collection(db, "scans");
-      const q = query(
-        scansRef,
-        where("userId", "==", user.uid),
-        orderBy("createdAt", "desc"),
-        limit(1)
-      );
+      // Load latest scan from /users/{uid}/scans/
+      const scansRef = collection(db, "users", user.uid, "scans");
+      const q = query(scansRef, orderBy("createdAt", "desc"), limit(1));
       const snap = await getDocs(q);
       if (!snap.empty) {
         const scanData = snap.docs[0].data();
         setLastScan(scanData);
-        setHealthScore(scanData.healthScore || null);
+        setHealthScore(scanData.healthScore ?? null);
       }
 
-      // Check agent heartbeat (written by local agent to Firestore)
-      const agentRef = doc(db, "agents", user.uid);
+      // Check agent heartbeat from /users/{uid}/agent/status
+      const agentRef  = doc(db, "users", user.uid, "agent", "status");
       const agentSnap = await getDoc(agentRef);
       if (agentSnap.exists()) {
         const heartbeat = agentSnap.data().lastHeartbeat?.toDate();
-        const isAlive = heartbeat && Date.now() - heartbeat.getTime() < 60000; // 60s
+        const isAlive   = heartbeat && Date.now() - heartbeat.getTime() < 90000; // 90s window
         setAgentConnected(isAlive);
       }
     } catch (err) {
@@ -138,8 +132,8 @@ export default function Dashboard({ user }) {
             )}
           </div>
           {!agentConnected && (
-            <button style={styles.downloadBtn}>
-              {t("dashboard.downloadAgent")}
+            <button onClick={() => navigate("/setup")} style={styles.downloadBtn}>
+              {t("setup.setupAgent")}
             </button>
           )}
         </div>

@@ -4,7 +4,6 @@ import { useNavigate } from "react-router-dom";
 import {
   collection,
   query,
-  where,
   orderBy,
   limit,
   getDocs,
@@ -31,8 +30,7 @@ export default function Report({ user }) {
   const loadLatestReport = async () => {
     try {
       const q = query(
-        collection(db, "scans"),
-        where("userId", "==", user.uid),
+        collection(db, "users", user.uid, "scans"),
         orderBy("createdAt", "desc"),
         limit(1)
       );

@@ -1,251 +1,201 @@
 """
-PC Health & Security Agent
---------------------------
-Runs locally on the Windows PC being monitored.
-Communicates with Firebase Firestore to:
-  - Send heartbeat (so the web app knows the agent is alive)
-  - Write scan results
-  - Poll for pending actions from the web app (clean/backup commands)
+PC Security Agent v0.5.0
+-------------------------
+Public SaaS agent — no service account required.
 
-Safety principles enforced here:
-  - Read-only mode by default
-  - Preview before deletion
-  - Auto backup before any cleanup
-  - Full undo capability via restore from backup
-  - Detailed action log written to Firestore
+Setup:
+  1. Sign in at https://pcguard-rami.web.app
+  2. Copy your AgentToken from the Setup page
+  3. Paste it into agent/.env as AGENT_TOKEN=pcg-...
+  4. Run: python main.py
+
+Authentication: the agent sends its AgentToken to Firebase Cloud Functions.
+The server validates the token and writes data under the correct user's
+isolated Firestore path (/users/{uid}/).
+
+SAFETY: READ-ONLY — this agent never modifies any file or system setting.
 """
 
 import os
 import sys
-import json
 import time
+import socket
 import logging
+import requests
 import schedule
-import threading
-from datetime import datetime, timezone
 from dotenv import load_dotenv
 
-import firebase_admin
-from firebase_admin import credentials, firestore
-
-from modules.scanner import Scanner
-from modules.cleaner import Cleaner
-from modules.backup import BackupManager
-from modules.privacy import PrivacyScanner
+from modules.scanner   import Scanner
+from modules.processes import ProcessScanner
+from modules.network   import NetworkScanner
+from modules.privacy   import PrivacyScanner
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
 load_dotenv()
 
-FIREBASE_CRED_PATH = os.getenv("FIREBASE_CRED_PATH", "serviceAccountKey.json")
-USER_ID = os.getenv("USER_ID", "")          # Set after first auth via web app
-HEARTBEAT_INTERVAL = 30                      # seconds
-SCAN_INTERVAL_MINUTES = 60                   # auto-scan every hour
-READ_ONLY_MODE = True                        # Safety: default read-only
+AGENT_VERSION   = "0.5.0"
+AGENT_TOKEN     = os.getenv("AGENT_TOKEN", "")
+SCAN_INTERVAL   = int(os.getenv("SCAN_INTERVAL",       "300"))  # seconds
+HEARTBEAT_SECS  = int(os.getenv("HEARTBEAT_INTERVAL",  "60"))
+READ_ONLY       = True
+
+FUNCTIONS_BASE  = "https://us-central1-pc-security-dashboard.cloudfunctions.net"
+HEARTBEAT_URL   = f"{FUNCTIONS_BASE}/agentHeartbeat"
+SUBMIT_SCAN_URL = f"{FUNCTIONS_BASE}/submitScan"
+REQUEST_TIMEOUT = 30  # seconds
+
+# ── Logging ───────────────────────────────────────────────────────────────────
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
     handlers=[
-        logging.FileHandler("agent.log"),
+        logging.FileHandler("agent.log", encoding="utf-8"),
         logging.StreamHandler(sys.stdout),
     ],
 )
-log = logging.getLogger(__name__)
-
-# ── Firebase init ─────────────────────────────────────────────────────────────
-
-def init_firebase():
-    if not os.path.exists(FIREBASE_CRED_PATH):
-        log.error(f"Firebase credentials not found at '{FIREBASE_CRED_PATH}'")
-        log.error("Download your service account key from Firebase Console and place it here.")
-        sys.exit(1)
-    cred = credentials.Certificate(FIREBASE_CRED_PATH)
-    firebase_admin.initialize_app(cred)
-    return firestore.client()
+log = logging.getLogger("agent")
 
 # ── Heartbeat ─────────────────────────────────────────────────────────────────
 
-def send_heartbeat(db):
-    if not USER_ID:
+def send_heartbeat():
+    if not AGENT_TOKEN:
         return
     try:
-        db.collection("agents").document(USER_ID).set({
-            "lastHeartbeat": firestore.SERVER_TIMESTAMP,
-            "hostname": os.environ.get("COMPUTERNAME", "unknown"),
-            "agentVersion": "0.1.0",
-            "readOnlyMode": READ_ONLY_MODE,
-        }, merge=True)
-        log.debug("Heartbeat sent")
-    except Exception as e:
-        log.error(f"Heartbeat failed: {e}")
+        r = requests.post(HEARTBEAT_URL, json={
+            "token":        AGENT_TOKEN,
+            "hostname":     socket.gethostname(),
+            "username":     os.environ.get("USERNAME", "unknown"),
+            "agentVersion": AGENT_VERSION,
+            "readOnlyMode": READ_ONLY,
+        }, timeout=REQUEST_TIMEOUT)
+        if r.status_code == 200:
+            log.debug("Heartbeat sent")
+        elif r.status_code == 401:
+            log.error("Heartbeat rejected — AgentToken is invalid. Check your .env file.")
+        else:
+            log.warning(f"Heartbeat returned {r.status_code}: {r.text[:100]}")
+    except requests.RequestException as e:
+        log.warning(f"Heartbeat failed (network): {e}")
 
-# ── Scan & upload ─────────────────────────────────────────────────────────────
+# ── Scan ──────────────────────────────────────────────────────────────────────
 
-def run_scan(db):
-    if not USER_ID:
-        log.warning("USER_ID not set — skipping scan upload")
+def run_scan():
+    if not AGENT_TOKEN:
+        log.warning("AGENT_TOKEN not set — scan not uploaded. See agent/.env")
         return
 
-    log.info("Starting system scan...")
-    scanner = Scanner(read_only=True)
-    privacy = PrivacyScanner(read_only=True)
+    log.info("=" * 60)
+    log.info("Starting full system scan...")
 
-    scan_result = {
-        "userId": USER_ID,
-        "createdAt": firestore.SERVER_TIMESTAMP,
-        "agentVersion": "0.1.0",
-        "healthScore": None,           # calculated after all modules
-        "storage": scanner.scan_storage(),
-        "tempFiles": scanner.scan_temp_files(),
-        "largeFiles": scanner.scan_large_files(),
-        "duplicates": scanner.scan_duplicates(),
-        "startupItems": scanner.scan_startup_items(),
-        "browserData": privacy.scan_browser_data(),
-        "vulnerabilities": scanner.scan_vulnerabilities(),
-        "outdatedSoftware": scanner.scan_outdated_software(),
+    scan = {
+        "agentVersion":      AGENT_VERSION,
+        "hostname":          socket.gethostname(),
+        "healthScore":       None,
+        "storage":           _safe("storage",         Scanner().scan_all_drives),
+        "tempSummary":       _safe("temp_summary",    Scanner().scan_temp_summary),
+        "largeFiles":        _safe("large_files",     Scanner().scan_large_files),
+        "startupItems":      _safe("startup_items",   Scanner().scan_startup_items),
+        "installedSoftware": _safe("installed_sw",    Scanner().scan_installed_software),
+        "vulnerabilities":   _safe("vulnerabilities", Scanner().scan_vulnerabilities),
+        "processes":         _safe("processes",       ProcessScanner().scan_processes),
+        "networkConnections":_safe("network",         NetworkScanner().scan_connections),
+        "browserData":       _safe("browser",         PrivacyScanner().scan_browser_data),
     }
 
-    scan_result["healthScore"] = _calculate_health_score(scan_result)
+    scan["healthScore"] = _health_score(scan)
+    log.info(f"Health score: {scan['healthScore']}/100")
 
-    doc_ref = db.collection("scans").document()
-    doc_ref.set(scan_result)
-    log.info(f"Scan complete. Health score: {scan_result['healthScore']}/100. Doc: {doc_ref.id}")
-    return doc_ref.id
+    try:
+        r = requests.post(SUBMIT_SCAN_URL, json={
+            "token": AGENT_TOKEN,
+            "scan":  scan,
+        }, timeout=REQUEST_TIMEOUT)
 
-def _calculate_health_score(result):
+        if r.status_code == 200:
+            scan_id = r.json().get("scanId", "?")
+            log.info(f"Scan uploaded — id: {scan_id}")
+        elif r.status_code == 401:
+            log.error("Scan rejected — AgentToken is invalid. Check your .env file.")
+        else:
+            log.error(f"Scan upload failed {r.status_code}: {r.text[:200]}")
+    except requests.RequestException as e:
+        log.error(f"Scan upload failed (network): {e}")
+
+    log.info("=" * 60)
+
+def _safe(name, fn):
+    try:
+        result = fn()
+        count = len(result) if isinstance(result, list) else len(result) if isinstance(result, dict) else "?"
+        log.info(f"  [{name}] OK ({count} items)")
+        return result
+    except Exception as e:
+        log.error(f"  [{name}] FAILED: {e}")
+        return [] if name not in ("storage", "temp_summary") else {}
+
+# ── Health score ──────────────────────────────────────────────────────────────
+
+def _health_score(scan: dict) -> int:
     score = 100
-    if len(result.get("tempFiles", [])) > 50:
+
+    for drive in scan.get("storage", []):
+        pct = drive.get("usedPercent", 0)
+        if pct >= 90:   score -= 20
+        elif pct >= 80: score -= 10
+
+    temp_bytes = scan.get("tempSummary", {}).get("totalBytes", 0)
+    if temp_bytes > 1 * 1024 ** 3:
         score -= 10
-    if len(result.get("vulnerabilities", [])) > 0:
-        score -= 20
-    if len(result.get("outdatedSoftware", [])) > 3:
-        score -= 10
-    storage = result.get("storage", {})
-    if storage.get("usedPercent", 0) > 90:
-        score -= 15
-    return max(0, score)
 
-# ── Action polling ────────────────────────────────────────────────────────────
+    for v in scan.get("vulnerabilities", []):
+        if v.get("severity") == "critical": score -= 15
+        elif v.get("severity") == "high":   score -= 8
+        elif v.get("severity") == "medium": score -= 3
 
-def poll_pending_actions(db):
-    """
-    Web app writes pending_actions to Firestore; agent picks them up here.
-    Every action creates an audit log entry regardless of outcome.
-    """
-    if not USER_ID:
-        return
-    try:
-        actions_ref = (
-            db.collection("pending_actions")
-            .where("userId", "==", USER_ID)
-            .where("status", "==", "pending")
-            .limit(5)
-            .stream()
-        )
-        for action_doc in actions_ref:
-            action = action_doc.to_dict()
-            _execute_action(db, action_doc.id, action)
-    except Exception as e:
-        log.error(f"Action poll error: {e}")
+    suspicious_procs = sum(1 for p in scan.get("processes", []) if p.get("suspicious"))
+    if   suspicious_procs >= 3: score -= 15
+    elif suspicious_procs >= 1: score -= 8
 
-def _execute_action(db, action_id, action):
-    action_type = action.get("type")
-    payload = action.get("payload", {})
-    log.info(f"Executing action: {action_type} | payload keys: {list(payload.keys())}")
+    suspicious_conns = sum(1 for c in scan.get("networkConnections", []) if c.get("suspicious"))
+    score -= min(suspicious_conns * 5, 20)
 
-    result = {"status": "error", "message": "Unknown action"}
+    return max(0, min(100, score))
 
-    try:
-        if READ_ONLY_MODE and action_type not in ("preview",):
-            result = {"status": "blocked", "message": "Agent is in read-only mode"}
-        elif action_type == "clean":
-            result = _handle_clean(payload)
-        elif action_type == "backup":
-            result = _handle_backup(payload)
-        elif action_type == "undo":
-            result = _handle_undo(payload)
-        elif action_type == "preview":
-            result = {"status": "ok", "preview": payload.get("items", [])}
-    except Exception as e:
-        result = {"status": "error", "message": str(e)}
-        log.exception(f"Action {action_type} failed")
-
-    # Update action doc + write audit log
-    db.collection("pending_actions").document(action_id).update({
-        "status": result["status"],
-        "result": result,
-        "completedAt": firestore.SERVER_TIMESTAMP,
-    })
-    db.collection("action_log").add({
-        "userId": USER_ID,
-        "actionId": action_id,
-        "actionType": action_type,
-        "payload": payload,
-        "result": result,
-        "timestamp": firestore.SERVER_TIMESTAMP,
-    })
-
-def _handle_clean(payload):
-    cleaner = Cleaner(read_only=READ_ONLY_MODE)
-    backup_mgr = BackupManager()
-
-    items = payload.get("items", [])
-    if not items:
-        return {"status": "error", "message": "No items specified"}
-
-    # Auto backup before clean
-    backup_path = backup_mgr.create_backup(items)
-    log.info(f"Backup created at: {backup_path}")
-
-    result = cleaner.clean_items(items)
-    return {
-        "status": "ok",
-        "cleaned": result["cleaned"],
-        "failed": result["failed"],
-        "backupPath": backup_path,
-    }
-
-def _handle_backup(payload):
-    backup_mgr = BackupManager()
-    items = payload.get("items", [])
-    backup_path = backup_mgr.create_backup(items)
-    return {"status": "ok", "backupPath": backup_path}
-
-def _handle_undo(payload):
-    backup_mgr = BackupManager()
-    backup_path = payload.get("backupPath")
-    if not backup_path:
-        return {"status": "error", "message": "No backup path provided"}
-    backup_mgr.restore_backup(backup_path)
-    return {"status": "ok", "restored": backup_path}
-
-# ── Main loop ─────────────────────────────────────────────────────────────────
+# ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
-    log.info("PC Security Agent starting...")
-    log.info(f"Read-only mode: {READ_ONLY_MODE}")
+    log.info(f"PC Security Agent v{AGENT_VERSION}  [READ-ONLY: {READ_ONLY}]")
 
-    if not USER_ID:
-        log.warning(
-            "USER_ID is not set in .env — agent will not upload results.\n"
-            "Set USER_ID to your Firebase user UID after signing in via the web app."
-        )
+    if not AGENT_TOKEN:
+        log.error("─" * 60)
+        log.error("AGENT_TOKEN is not set in .env")
+        log.error("")
+        log.error("  1. Sign in at https://pcguard-rami.web.app")
+        log.error("  2. Go to the Setup page")
+        log.error("  3. Copy your AgentToken")
+        log.error("  4. Add to agent/.env:  AGENT_TOKEN=pcg-...")
+        log.error("─" * 60)
+        sys.exit(1)
 
-    db = init_firebase()
+    # Run immediately on startup
+    send_heartbeat()
+    run_scan()
 
-    # Initial scan on startup
-    run_scan(db)
+    # Schedule recurring tasks
+    schedule.every(HEARTBEAT_SECS).seconds.do(send_heartbeat)
+    schedule.every(SCAN_INTERVAL).seconds.do(run_scan)
 
-    # Schedules
-    schedule.every(HEARTBEAT_INTERVAL).seconds.do(send_heartbeat, db)
-    schedule.every(SCAN_INTERVAL_MINUTES).minutes.do(run_scan, db)
-    schedule.every(10).seconds.do(poll_pending_actions, db)
-
+    log.info(f"Heartbeat every {HEARTBEAT_SECS}s | Scan every {SCAN_INTERVAL}s")
     log.info("Agent running. Press Ctrl+C to stop.")
+
     while True:
         schedule.run_pending()
         time.sleep(1)
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        log.info("Agent stopped.")

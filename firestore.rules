@@ -2,38 +2,36 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Users can only read/write their own user document
-    match /users/{userId} {
-      allow read, write: if request.auth != null && request.auth.uid == userId;
+    // ── User documents and all subcollections ──────────────────────────────
+    // Each user can only access their own data. No cross-user reads possible.
+    match /users/{uid} {
+      allow read, write: if request.auth != null && request.auth.uid == uid;
+
+      // Scans subcollection — user-owned, no deletion
+      match /scans/{scanId} {
+        allow read:   if request.auth != null && request.auth.uid == uid;
+        allow create: if request.auth != null && request.auth.uid == uid;
+        allow update: if request.auth != null && request.auth.uid == uid;
+        allow delete: if false;
+      }
+
+      // Agent status subcollection — user reads, agent writes via Cloud Function
+      match /agent/{doc} {
+        allow read:  if request.auth != null && request.auth.uid == uid;
+        allow write: if false; // only written by Cloud Functions (Admin SDK)
+      }
     }
 
-    // Users can only read/write their own scans
-    match /scans/{scanId} {
-      allow read: if request.auth != null && request.auth.uid == resource.data.userId;
-      allow create: if request.auth != null;
-      allow update: if request.auth != null && request.auth.uid == resource.data.userId;
-      allow delete: if false;
+    // ── Agent tokens ───────────────────────────────────────────────────────
+    // Never readable or writable from the client.
+    // Created and validated only by Cloud Functions using Admin SDK.
+    match /agentTokens/{token} {
+      allow read, write: if false;
     }
 
-    // Agent document — agent writes, user reads
-    match /agents/{userId} {
-      allow read: if request.auth != null && request.auth.uid == userId;
-      // Writes come from agent via service account (admin SDK), not client
-      allow write: if false;
-    }
-
-    // Pending actions — user creates, agent reads/updates via admin SDK
-    match /pending_actions/{actionId} {
-      allow create: if request.auth != null;
-      allow read: if request.auth != null && request.auth.uid == resource.data.userId;
-      allow update: if false; // only admin SDK (agent)
-      allow delete: if false;
-    }
-
-    // Action log — read-only for user, written by agent via admin SDK
-    match /action_log/{logId} {
-      allow read: if request.auth != null && request.auth.uid == resource.data.userId;
-      allow write: if false;
+    // ── Deny everything else ───────────────────────────────────────────────
+    match /{document=**} {
+      allow read, write: if false;
     }
   }
 }

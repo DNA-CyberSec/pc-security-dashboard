@@ -1,0 +1,75 @@
+name: Build Windows Agent
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          cd agent
+          pip install -r requirements.txt
+
+      - name: Build PCGuard-Setup.exe
+        run: |
+          cd agent
+          pyinstaller `
+            --onefile `
+            --windowed `
+            --name "PCGuard-Setup" `
+            --paths . `
+            --hidden-import=psutil `
+            --hidden-import=requests `
+            --hidden-import=schedule `
+            --hidden-import=dotenv `
+            --hidden-import=winreg `
+            --hidden-import=modules.scanner `
+            --hidden-import=modules.processes `
+            --hidden-import=modules.network `
+            --hidden-import=modules.privacy `
+            --hidden-import=modules.backup `
+            --hidden-import=modules.cleaner `
+            setup_wizard.py
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: PCGuard-Setup
+          path: agent/dist/PCGuard-Setup.exe
+
+      - name: Get version from package.json
+        id: version
+        shell: bash
+        run: echo "VERSION=$(node -p "require('./web-app/package.json').version")" >> $GITHUB_OUTPUT
+
+      - name: Create GitHub Release
+        uses: ncipollo/release-action@v1
+        with:
+          tag: v${{ steps.version.outputs.VERSION }}
+          name: PCGuard v${{ steps.version.outputs.VERSION }}
+          allowUpdates: true
+          artifacts: agent/dist/PCGuard-Setup.exe
+          token: ${{ secrets.GITHUB_TOKEN }}
+          body: |
+            ## PCGuard v${{ steps.version.outputs.VERSION }}
+
+            ### Installation
+            1. Download **PCGuard-Setup.exe**
+            2. Double-click the file
+            3. Paste your personal token from the [Setup page](https://pcguard-rami.web.app/setup)
+            4. Click **Install** — done!
+
+            > Windows 10 / 11 · No technical knowledge needed

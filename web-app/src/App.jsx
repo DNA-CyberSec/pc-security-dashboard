@@ -5,6 +5,7 @@ import { auth } from "./firebase";
 import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
 import Report from "./pages/Report";
+import Setup from "./pages/Setup";
 import Footer from "./components/Footer";
 import "./i18n";
 
@@ -44,6 +45,14 @@ export default function App() {
               element={
                 <ProtectedRoute user={user}>
                   <Report user={user} />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/setup"
+              element={
+                <ProtectedRoute user={user}>
+                  <Setup user={user} />
                 </ProtectedRoute>
               }
             />
