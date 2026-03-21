@@ -1,0 +1,33 @@
+# Dependencies
+node_modules/
+web-app/node_modules/
+functions/node_modules/
+
+# Build output
+web-app/build/
+
+# Environment variables — never commit real keys
+web-app/.env
+agent/.env
+agent/serviceAccountKey.json
+
+# Firebase
+.firebase/
+firebase-debug.log
+firestore-debug.log
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+agent/dist/
+agent/build/
+agent/*.spec
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+agent/agent.log

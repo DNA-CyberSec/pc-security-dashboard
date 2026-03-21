@@ -1,0 +1,96 @@
+{
+  "app": {
+    "title": "לוח בקרה לבריאות ואבטחת המחשב",
+    "tagline": "נטר, נקה והגן על המחשב שלך — בבטחה וביעילות"
+  },
+  "nav": {
+    "dashboard": "לוח בקרה",
+    "reports": "דוחות",
+    "settings": "הגדרות",
+    "logout": "התנתק"
+  },
+  "login": {
+    "title": "לוח בקרה לבריאות ואבטחת המחשב",
+    "subtitle": "התחבר כדי לגשת ללוח הבקרה שלך",
+    "signInWithGoogle": "התחבר עם Google",
+    "disclaimer": "רק החשבון שלך יכול לראות את נתוני המחשב"
+  },
+  "dashboard": {
+    "welcome": "ברוך הבא, {{name}}",
+    "lastScan": "סריקה אחרונה",
+    "neverScanned": "מעולם לא",
+    "runScan": "הפעל סריקה חדשה",
+    "scanning": "סורק...",
+    "health": "בריאות המערכת",
+    "healthScore": "ציון בריאות",
+    "agentStatus": "סטטוס הסוכן",
+    "agentConnected": "הסוכן מחובר",
+    "agentDisconnected": "הסוכן לא מחובר",
+    "agentInstructions": "הורד והפעל את הסוכן המקומי במחשב שלך כדי לאפשר סריקה",
+    "downloadAgent": "הורד סוכן",
+    "sections": {
+      "storage": "אחסון",
+      "security": "אבטחה",
+      "privacy": "פרטיות",
+      "performance": "ביצועים"
+    },
+    "status": {
+      "good": "תקין",
+      "warning": "דורש תשומת לב",
+      "critical": "קריטי"
+    }
+  },
+  "report": {
+    "title": "דוח סריקה",
+    "generatedAt": "נוצר בתאריך",
+    "summary": "סיכום",
+    "details": "פרטים",
+    "recommendations": "המלצות AI",
+    "actions": {
+      "clean": "נקה",
+      "backup": "גבה",
+      "ignore": "התעלם",
+      "preview": "תצוגה מקדימה של שינויים",
+      "undo": "בטל פעולה אחרונה"
+    },
+    "safety": {
+      "previewTitle": "תצוגה מקדימה — לא בוצעו שינויים עדיין",
+      "backupCreated": "גיבוי נוצר בנתיב {{path}}",
+      "confirmClean": "האם אתה בטוח? גיבוי ייווצר לפני כל מחיקה.",
+      "cleanSuccess": "ניקוי בוצע בהצלחה. הגיבוי נשמר.",
+      "undoSuccess": "הפעולה בוטלה בהצלחה."
+    },
+    "categories": {
+      "tempFiles": "קבצים זמניים",
+      "largeFiles": "קבצים גדולים",
+      "duplicates": "קבצים כפולים",
+      "startupItems": "פריטי הפעלה",
+      "browserData": "נתוני דפדפן",
+      "vulnerabilities": "פגיעויות אבטחה",
+      "outdatedSoftware": "תוכנה מיושנת"
+    }
+  },
+  "settings": {
+    "language": "שפה",
+    "theme": "ערכת נושא",
+    "notifications": "התראות",
+    "plan": "תוכנית",
+    "planFree": "חינמי",
+    "planPro": "מקצועי",
+    "upgradePro": "שדרג לתוכנית מקצועית"
+  },
+  "errors": {
+    "signInFailed": "ההתחברות נכשלה. נסה שוב.",
+    "scanFailed": "הסריקה נכשלה. ודא שהסוכן המקומי פועל.",
+    "loadFailed": "טעינת הנתונים נכשלה. רענן את הדף."
+  },
+  "common": {
+    "loading": "טוען...",
+    "save": "שמור",
+    "cancel": "ביטול",
+    "confirm": "אישור",
+    "back": "חזור",
+    "close": "סגור",
+    "noData": "אין נתונים זמינים"
+  }
+}

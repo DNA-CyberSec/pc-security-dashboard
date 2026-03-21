@@ -1,0 +1,39 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Users can only read/write their own user document
+    match /users/{userId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+
+    // Users can only read/write their own scans
+    match /scans/{scanId} {
+      allow read: if request.auth != null && request.auth.uid == resource.data.userId;
+      allow create: if request.auth != null;
+      allow update: if request.auth != null && request.auth.uid == resource.data.userId;
+      allow delete: if false;
+    }
+
+    // Agent document — agent writes, user reads
+    match /agents/{userId} {
+      allow read: if request.auth != null && request.auth.uid == userId;
+      // Writes come from agent via service account (admin SDK), not client
+      allow write: if false;
+    }
+
+    // Pending actions — user creates, agent reads/updates via admin SDK
+    match /pending_actions/{actionId} {
+      allow create: if request.auth != null;
+      allow read: if request.auth != null && request.auth.uid == resource.data.userId;
+      allow update: if false; // only admin SDK (agent)
+      allow delete: if false;
+    }
+
+    // Action log — read-only for user, written by agent via admin SDK
+    match /action_log/{logId} {
+      allow read: if request.auth != null && request.auth.uid == resource.data.userId;
+      allow write: if false;
+    }
+  }
+}

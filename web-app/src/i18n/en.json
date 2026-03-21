@@ -1,0 +1,96 @@
+{
+  "app": {
+    "title": "PC Health & Security Dashboard",
+    "tagline": "Monitor, clean, and protect your PC — safely and intelligently"
+  },
+  "nav": {
+    "dashboard": "Dashboard",
+    "reports": "Reports",
+    "settings": "Settings",
+    "logout": "Logout"
+  },
+  "login": {
+    "title": "PC Health & Security Dashboard",
+    "subtitle": "Sign in to access your dashboard",
+    "signInWithGoogle": "Sign in with Google",
+    "disclaimer": "Only your account can view your PC's data"
+  },
+  "dashboard": {
+    "welcome": "Welcome, {{name}}",
+    "lastScan": "Last Scan",
+    "neverScanned": "Never",
+    "runScan": "Run New Scan",
+    "scanning": "Scanning...",
+    "health": "System Health",
+    "healthScore": "Health Score",
+    "agentStatus": "Agent Status",
+    "agentConnected": "Agent Connected",
+    "agentDisconnected": "Agent Not Connected",
+    "agentInstructions": "Download and run the local agent on your PC to enable scanning",
+    "downloadAgent": "Download Agent",
+    "sections": {
+      "storage": "Storage",
+      "security": "Security",
+      "privacy": "Privacy",
+      "performance": "Performance"
+    },
+    "status": {
+      "good": "Good",
+      "warning": "Needs Attention",
+      "critical": "Critical"
+    }
+  },
+  "report": {
+    "title": "Scan Report",
+    "generatedAt": "Generated at",
+    "summary": "Summary",
+    "details": "Details",
+    "recommendations": "AI Recommendations",
+    "actions": {
+      "clean": "Clean",
+      "backup": "Backup",
+      "ignore": "Ignore",
+      "preview": "Preview Changes",
+      "undo": "Undo Last Action"
+    },
+    "safety": {
+      "previewTitle": "Preview — No changes made yet",
+      "backupCreated": "Backup created at {{path}}",
+      "confirmClean": "Are you sure? A backup will be created before any deletion.",
+      "cleanSuccess": "Cleaned successfully. Backup saved.",
+      "undoSuccess": "Action undone successfully."
+    },
+    "categories": {
+      "tempFiles": "Temporary Files",
+      "largeFiles": "Large Files",
+      "duplicates": "Duplicate Files",
+      "startupItems": "Startup Items",
+      "browserData": "Browser Data",
+      "vulnerabilities": "Vulnerabilities",
+      "outdatedSoftware": "Outdated Software"
+    }
+  },
+  "settings": {
+    "language": "Language",
+    "theme": "Theme",
+    "notifications": "Notifications",
+    "plan": "Plan",
+    "planFree": "Free",
+    "planPro": "Pro",
+    "upgradePro": "Upgrade to Pro"
+  },
+  "errors": {
+    "signInFailed": "Sign-in failed. Please try again.",
+    "scanFailed": "Scan failed. Ensure the local agent is running.",
+    "loadFailed": "Failed to load data. Please refresh."
+  },
+  "common": {
+    "loading": "Loading...",
+    "save": "Save",
+    "cancel": "Cancel",
+    "confirm": "Confirm",
+    "back": "Back",
+    "close": "Close",
+    "noData": "No data available"
+  }
+}
