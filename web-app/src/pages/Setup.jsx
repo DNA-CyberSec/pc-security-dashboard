@@ -103,22 +103,18 @@ export default function Setup({ user }) {
             </div>
           </div>
 
-          {/* Step 2 — Download */}
-          <div style={s.stepCard}>
-            <div style={s.stepBadge}>2</div>
-            <div style={s.stepContent}>
-              <h2 style={s.stepTitle}>{t("setup.step2Title")}</h2>
-              <p style={s.stepDesc}>{t("setup.step2Desc")}</p>
-              <a href={AGENT_DOWNLOAD_URL} style={s.downloadBtn}>
-                ⬇&nbsp; {t("setup.downloadBtn")}
-              </a>
-              <p style={s.tokenNote}>{t("setup.windowsOnly")}</p>
-            </div>
+          {/* Download CTA */}
+          <div style={s.downloadCard}>
+            <p style={s.downloadLabel}>{t("setup.step2Desc")}</p>
+            <a href={AGENT_DOWNLOAD_URL} style={s.downloadBigBtn} download>
+              ⬇&nbsp;&nbsp;{t("setup.downloadBtn")}
+            </a>
+            <p style={s.downloadNote}>{t("setup.windowsOnly")}</p>
           </div>
 
-          {/* Step 3 — Run installer */}
+          {/* Step 2 — Run installer */}
           <div style={s.stepCard}>
-            <div style={s.stepBadge}>3</div>
+            <div style={s.stepBadge}>2</div>
             <div style={s.stepContent}>
               <h2 style={s.stepTitle}>{t("setup.step3Title")}</h2>
               <p style={s.stepDesc}>{t("setup.step3Desc")}</p>
@@ -130,9 +126,9 @@ export default function Setup({ user }) {
             </div>
           </div>
 
-          {/* Step 4 — Come back */}
+          {/* Step 3 — Come back */}
           <div style={{ ...s.stepCard, borderColor: "#238636", background: "#0d2818" }}>
-            <div style={{ ...s.stepBadge, background: "#238636" }}>4</div>
+            <div style={{ ...s.stepBadge, background: "#238636" }}>3</div>
             <div style={s.stepContent}>
               <h2 style={{ ...s.stepTitle, color: "#56d364" }}>{t("setup.step4Title")}</h2>
               <p style={{ ...s.stepDesc, color: "#8b949e" }}>{t("setup.step4Desc")}</p>
@@ -207,6 +203,22 @@ const s = {
     borderRadius: 8, padding: "12px 16px", color: "#fc8181",
     fontSize: 13, marginBottom: 10,
   },
+  downloadCard: {
+    background: "#0d2818", border: "2px solid #238636",
+    borderRadius: 14, padding: "28px 32px",
+    display: "flex", flexDirection: "column", alignItems: "center", gap: 12,
+    textAlign: "center",
+  },
+  downloadLabel: { fontSize: 14, color: "#8b949e", margin: 0 },
+  downloadBigBtn: {
+    display: "inline-flex", alignItems: "center", justifyContent: "center",
+    background: "#238636", color: "#fff",
+    borderRadius: 12, padding: "16px 40px",
+    textDecoration: "none", fontSize: 18, fontWeight: 700,
+    width: "100%", maxWidth: 420, letterSpacing: 0.3,
+    boxShadow: "0 4px 24px rgba(35,134,54,0.35)",
+  },
+  downloadNote: { fontSize: 12, color: "#4a5568", margin: 0 },
   downloadBtn: {
     display: "inline-flex", alignItems: "center",
     background: "#238636", color: "#fff",
