@@ -193,7 +193,10 @@ export default function Dashboard({ user }) {
   const ramTotalGB = realtimeData?.ram_total_gb;
   const disk       = getDiskInfo(latestScan?.storage);
   const health     = latestScan?.healthScore ?? agentStatus?.healthScore ?? null;
-  const vulnCount  = Array.isArray(latestScan?.vulnerabilities) ? latestScan.vulnerabilities.length : null;
+  const vulnCount      = Array.isArray(latestScan?.vulnerabilities) ? latestScan.vulnerabilities.length : null;
+  const threatCount    = agentStatus?.threatCount    ?? null;
+  const suspiciousCount = agentStatus?.suspiciousCount ?? null;
+  const firewallGrade  = agentStatus?.firewallGrade  ?? null;
   const topProcs   = realtimeData?.top_processes ?? [];
   const temps      = realtimeData?.temperatures  ?? [];
   const isLive     = realtimeData?.updatedAt &&
@@ -366,25 +369,67 @@ export default function Dashboard({ user }) {
           {/* Security */}
           <div style={s.infoCard}>
             <p style={s.cardTitle}>{t("dashboard.sections.security")}</p>
-            {vulnCount === null ? (
+            {threatCount === null && vulnCount === null ? (
               <p style={s.muted}>{t("dashboard.noAgentData")}</p>
-            ) : vulnCount === 0 ? (
-              <p style={{ ...s.bigVal, color: "#48bb78" }}>{t("dashboard.allClear")}</p>
             ) : (
               <>
-                <p style={{ ...s.bigVal, color: "#fc8181" }}>
-                  {t("dashboard.issues", { count: vulnCount })}
-                </p>
-                <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 8 }}>
-                  {(latestScan?.vulnerabilities ?? []).slice(0, 3).map((v, i) => (
-                    <p key={i} style={s.vulnItem}>
-                      {v.severity === "critical" ? "🔴" : v.severity === "high" ? "🟠" : "🟡"}
-                      {" "}{v.description}
-                    </p>
-                  ))}
-                </div>
+                {/* Threat summary */}
+                {threatCount !== null && threatCount > 0 ? (
+                  <p style={{ ...s.bigVal, color: "#fc8181", marginBottom: 4 }}>
+                    🔴 {t("dashboard.security.threats", { count: threatCount })}
+                  </p>
+                ) : suspiciousCount !== null && suspiciousCount > 0 ? (
+                  <p style={{ ...s.bigVal, color: "#ed8936", marginBottom: 4 }}>
+                    🟡 {t("dashboard.security.suspicious", { count: suspiciousCount })}
+                  </p>
+                ) : vulnCount === 0 ? (
+                  <p style={{ ...s.bigVal, color: "#48bb78", marginBottom: 4 }}>
+                    {t("dashboard.allClear")}
+                  </p>
+                ) : vulnCount > 0 ? (
+                  <p style={{ ...s.bigVal, color: "#fc8181", marginBottom: 4 }}>
+                    {t("dashboard.issues", { count: vulnCount })}
+                  </p>
+                ) : null}
+
+                {/* Firewall grade badge */}
+                {firewallGrade && (
+                  <div style={s.gradeRow}>
+                    <span style={s.gradeLabel}>{t("dashboard.security.firewall")}</span>
+                    <span style={{
+                      ...s.gradeBadge,
+                      background: firewallGrade === "A" ? "#0d2818"
+                                : firewallGrade === "F" ? "#2d1b1b" : "#2d2008",
+                      color: firewallGrade === "A" ? "#56d364"
+                           : firewallGrade === "F" ? "#fc8181" : "#f6ad55",
+                      borderColor: firewallGrade === "A" ? "#238636"
+                                 : firewallGrade === "F" ? "#742a2a" : "#7d4f00",
+                    }}>
+                      {t("dashboard.security.grade")} {firewallGrade}
+                    </span>
+                  </div>
+                )}
+
+                {/* Top vulnerabilities */}
+                {vulnCount > 0 && (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 8 }}>
+                    {(latestScan?.vulnerabilities ?? []).slice(0, 2).map((v, i) => (
+                      <p key={i} style={s.vulnItem}>
+                        {v.severity === "critical" ? "🔴" : v.severity === "high" ? "🟠" : "🟡"}
+                        {" "}{v.description}
+                      </p>
+                    ))}
+                  </div>
+                )}
               </>
             )}
+            <button
+              onClick={() => navigate("/report", { state: { tab: "security" } })}
+              style={{ ...s.viewReportBtn, marginTop: 12 }}
+              disabled={!latestScan}
+            >
+              {t("dashboard.viewReport")}
+            </button>
           </div>
 
           {/* Last scan + countdown */}
@@ -506,6 +551,19 @@ const s = {
 
   // Vuln
   vulnItem: { fontSize: 11, color: "#8b949e", margin: 0, lineHeight: 1.4 },
+
+  // Security card
+  gradeRow:   { display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 8 },
+  gradeLabel: { fontSize: 12, color: "#8b949e" },
+  gradeBadge: {
+    fontSize: 12, fontWeight: 700, padding: "2px 10px",
+    borderRadius: 20, border: "1px solid",
+  },
+  viewReportBtn: {
+    background: "transparent", border: "1px solid #30363d", color: "#8b949e",
+    borderRadius: 6, padding: "6px 12px", cursor: "pointer", fontSize: 12,
+    width: "100%",
+  },
 
   // Countdown
   countdownBox: { marginTop: 12, paddingTop: 12, borderTop: "1px solid #21262d" },

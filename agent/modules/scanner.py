@@ -6,6 +6,7 @@ Never modifies any file or registry key.
 """
 
 import os
+import re
 import json
 import logging
 import subprocess
@@ -19,6 +20,24 @@ log = logging.getLogger(__name__)
 
 TEMP_EXTENSIONS = {".tmp", ".temp", ".log", ".old", ".bak", ".chk", ".dmp", ".etl"}
 LARGE_FILE_MB   = 500   # flag files above this size
+
+# Known malware / RAT keywords (lowercase, checked via substring match in process name)
+MALWARE_KEYWORDS = {
+    "cryptominer", "xmrig", "wannacry", "njrat", "darkcomet",
+    "netsupport", "remcos", "asyncrat", "redline", "raccoon", "vidar",
+    "cobaltstrike", "beacon", "meterpreter", "mimikatz",
+    "netcat", "ncat", "psexec", "wce", "fgdump", "pwdump",
+    "xmr-stak", "ccminer", "cpuminer",
+}
+
+# Paths that are suspicious for executables / startup items
+_SUSPICIOUS_PATH_FRAGS = [
+    r"\temp\\", r"\appdata\local\temp\\", r"\downloads\\",
+    r"$recycle.bin", r"\appdata\roaming\temp\\",
+]
+
+# Regex: random-looking filename (all lowercase alphanum, 8-20 chars, no common words)
+_RANDOM_RE = re.compile(r"^[a-z0-9]{8,20}$")
 
 # Registry paths for installed software
 _SW_KEYS = [
@@ -289,6 +308,217 @@ class Scanner:
         return issues
 
 
+    # ── Malware suspects ──────────────────────────────────────────────────────
+
+    def scan_malware_suspects(self) -> list:
+        """
+        Checks running processes for malware indicators:
+          - Name matches a known malware keyword
+          - Executable path is in a suspicious location (Temp, Downloads, Recycle Bin)
+          - High CPU (>80%) + substantial memory (possible miner)
+        """
+        suspects = []
+        for proc in psutil.process_iter(["pid", "name", "exe", "cpu_percent", "memory_info"]):
+            try:
+                info     = proc.info
+                name     = (info["name"] or "").strip()
+                name_lc  = name.lower().replace(".exe", "")
+                exe      = info["exe"] or ""
+                exe_lc   = exe.lower()
+                cpu      = info.get("cpu_percent") or 0.0
+                mem_info = info.get("memory_info")
+                ram_mb   = round(mem_info.rss / 1e6, 1) if mem_info else 0.0
+
+                reasons = []
+
+                for kw in MALWARE_KEYWORDS:
+                    if kw in name_lc:
+                        reasons.append(f"known_malware:{kw}")
+
+                for frag in _SUSPICIOUS_PATH_FRAGS:
+                    if frag in exe_lc:
+                        reasons.append("suspicious_location")
+                        break
+
+                if cpu > 80 and ram_mb > 50:
+                    reasons.append(f"high_cpu:{cpu:.0f}%")
+
+                if reasons:
+                    suspects.append({
+                        "pid":      info["pid"],
+                        "name":     name,
+                        "exe":      exe,
+                        "cpu":      round(cpu, 1),
+                        "ram_mb":   ram_mb,
+                        "reasons":  reasons,
+                        "severity": "critical" if any("known_malware" in r for r in reasons) else "warning",
+                    })
+            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                pass
+        return suspects
+
+    # ── Enhanced startup security ──────────────────────────────────────────────
+
+    def scan_startup_security(self) -> list:
+        """
+        Enhanced startup analysis: reads HKCU Run / RunOnce / HKLM Run,
+        categorises each item as 'safe', 'suspicious', or 'unknown',
+        and measures the live RAM footprint of running startup processes.
+        """
+        items = []
+        run_keys = [
+            (winreg.HKEY_CURRENT_USER,  r"Software\Microsoft\Windows\CurrentVersion\Run",     "HKCU Run"),
+            (winreg.HKEY_CURRENT_USER,  r"Software\Microsoft\Windows\CurrentVersion\RunOnce", "HKCU RunOnce"),
+            (winreg.HKEY_LOCAL_MACHINE, r"Software\Microsoft\Windows\CurrentVersion\Run",     "HKLM Run"),
+        ]
+
+        # Build a quick exe→RAM map from running processes
+        proc_ram = {}
+        for p in psutil.process_iter(["exe", "memory_info"]):
+            try:
+                if p.info["exe"] and p.info["memory_info"]:
+                    key = os.path.normcase(p.info["exe"])
+                    proc_ram[key] = round(p.info["memory_info"].rss / 1e6, 1)
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                pass
+
+        for hive, key_path, source in run_keys:
+            try:
+                key = winreg.OpenKey(hive, key_path, 0, winreg.KEY_READ)
+                i = 0
+                while True:
+                    try:
+                        name, cmd, _ = winreg.EnumValue(key, i)
+                        i += 1
+                        exe_path = _extract_exe_path(cmd)
+                        exe_lc   = exe_path.lower()
+                        basename = os.path.basename(exe_lc)
+                        stem     = os.path.splitext(basename)[0]
+
+                        reasons = []
+                        if any(f in exe_lc for f in _SUSPICIOUS_PATH_FRAGS):
+                            reasons.append("suspicious_location")
+                        if _RANDOM_RE.match(stem) and _is_random_looking(stem):
+                            reasons.append("random_filename")
+                        if exe_path and not os.path.exists(exe_path):
+                            reasons.append("file_not_found")
+
+                        if reasons:
+                            category = "suspicious"
+                        elif exe_path and os.path.exists(exe_path):
+                            category = "safe"
+                        else:
+                            category = "unknown"
+
+                        ram_mb = proc_ram.get(os.path.normcase(exe_path)) if exe_path else None
+
+                        items.append({
+                            "name":     name,
+                            "command":  cmd,
+                            "exe_path": exe_path,
+                            "source":   source,
+                            "category": category,
+                            "reasons":  reasons,
+                            "ram_mb":   ram_mb,
+                            "heavy":    (ram_mb or 0) > 100,
+                        })
+                    except OSError:
+                        break
+                winreg.CloseKey(key)
+            except (FileNotFoundError, PermissionError, OSError):
+                pass
+
+        return items
+
+    # ── Firewall & Defender status ─────────────────────────────────────────────
+
+    def scan_firewall_status(self) -> dict:
+        """
+        Returns detailed firewall + Defender + Windows Update status.
+        Uses netsh for the 3 firewall profiles and PowerShell for Defender/Updates.
+        All subprocess calls use CREATE_NO_WINDOW.
+        """
+        result = {
+            "domain":   None, "private": None, "public": None,
+            "defender_enabled": None, "defender_signatures_age_days": None,
+            "pending_updates":  None, "overall_status": "unknown", "grade": "?",
+        }
+        NO_WIN = subprocess.CREATE_NO_WINDOW
+
+        # ── netsh advfirewall — 3 profiles ────────────────────────────────────
+        try:
+            r = subprocess.run(
+                ["netsh", "advfirewall", "show", "allprofiles"],
+                capture_output=True, text=True, timeout=10, creationflags=NO_WIN,
+            )
+            if r.returncode == 0 and r.stdout:
+                parts = re.split(r"(Domain Profile|Private Profile|Public Profile)",
+                                 r.stdout, flags=re.IGNORECASE)
+                for idx in range(1, len(parts), 2):
+                    section_name = parts[idx].lower()
+                    content      = parts[idx + 1] if idx + 1 < len(parts) else ""
+                    m = re.search(r"State\s+(ON|OFF)", content, re.IGNORECASE)
+                    if m:
+                        val = m.group(1).lower()
+                        if   "domain"  in section_name: result["domain"]  = val
+                        elif "private" in section_name: result["private"] = val
+                        elif "public"  in section_name: result["public"]  = val
+        except Exception as e:
+            log.debug(f"netsh firewall: {e}")
+
+        # ── Defender + signature age ───────────────────────────────────────────
+        try:
+            r = subprocess.run(
+                ["powershell", "-NoProfile", "-Command",
+                 "Get-MpComputerStatus | Select-Object AntivirusEnabled,"
+                 "RealTimeProtectionEnabled,AntivirusSignatureAge | ConvertTo-Json"],
+                capture_output=True, text=True, timeout=15, creationflags=NO_WIN,
+            )
+            if r.returncode == 0 and r.stdout.strip():
+                s = json.loads(r.stdout)
+                result["defender_enabled"] = bool(s.get("AntivirusEnabled"))
+                result["defender_realtime"] = bool(s.get("RealTimeProtectionEnabled"))
+                result["defender_signatures_age_days"] = int(s.get("AntivirusSignatureAge") or 0)
+        except Exception as e:
+            log.debug(f"Defender check: {e}")
+
+        # ── Pending Windows Updates ────────────────────────────────────────────
+        try:
+            r = subprocess.run(
+                ["powershell", "-NoProfile", "-Command",
+                 "(New-Object -ComObject Microsoft.Update.Session)"
+                 ".CreateUpdateSearcher().Search('IsInstalled=0').Updates.Count"],
+                capture_output=True, text=True, timeout=30, creationflags=NO_WIN,
+            )
+            if r.returncode == 0 and r.stdout.strip().isdigit():
+                result["pending_updates"] = int(r.stdout.strip())
+        except Exception as e:
+            log.debug(f"Windows Update check: {e}")
+
+        # ── Overall status + grade ─────────────────────────────────────────────
+        critical = (
+            result.get("domain")  == "off" or
+            result.get("private") == "off" or
+            result.get("public")  == "off" or
+            result.get("defender_enabled") is False
+        )
+        sig_age = result.get("defender_signatures_age_days") or 0
+        updates = result.get("pending_updates") or 0
+        warning = sig_age > 3 or updates > 5
+
+        if critical:
+            result["overall_status"] = "critical"
+            result["grade"] = "F"
+        elif warning:
+            result["overall_status"] = "warning"
+            result["grade"] = "C" if (sig_age > 7 or updates > 10) else "B"
+        else:
+            result["overall_status"] = "secure"
+            result["grade"] = "A"
+
+        return result
+
+
 # ── Registry helpers ──────────────────────────────────────────────────────────
 
 def _read_sw_entry(key) -> dict:
@@ -347,3 +577,46 @@ def _fmt(size_bytes: int) -> str:
             return f"{size_bytes:.1f} {unit}"
         size_bytes /= 1024
     return f"{size_bytes:.1f} TB"
+
+
+def _extract_exe_path(cmd: str) -> str:
+    """
+    Extract the executable path from a registry Run command string.
+    Handles quoted paths, paths with arguments, and bare paths.
+    """
+    if not cmd:
+        return ""
+    cmd = cmd.strip()
+    # Quoted path: "C:\path\to\app.exe" [args...]
+    if cmd.startswith('"'):
+        end = cmd.find('"', 1)
+        if end != -1:
+            return cmd[1:end]
+    # Unquoted: split on first space that follows an .exe
+    m = re.match(r"([^\s]+\.exe)\b", cmd, re.IGNORECASE)
+    if m:
+        return m.group(1)
+    # Fallback: first token
+    return cmd.split()[0] if cmd else ""
+
+
+# Common word fragments that disqualify a name from being "random"
+_COMMON_STEMS = {
+    "update", "setup", "install", "uninstall", "helper", "agent",
+    "service", "launcher", "host", "client", "server", "manager",
+    "player", "viewer", "editor", "loader", "updater",
+}
+
+
+def _is_random_looking(stem: str) -> bool:
+    """
+    Returns True if the stem looks like a randomly-generated filename
+    (all lowercase alphanumeric, 8-20 chars, no common dictionary fragment).
+    """
+    stem = stem.lower()
+    if not _RANDOM_RE.match(stem):
+        return False
+    for word in _COMMON_STEMS:
+        if word in stem:
+            return False
+    return True

@@ -54,7 +54,13 @@
     "process": "תהליך",
     "justNow": "הרגע",
     "minutesAgo": "לפני {{n}}ד׳",
-    "hoursAgo": "לפני {{n}}ש׳"
+    "hoursAgo": "לפני {{n}}ש׳",
+    "security": {
+      "threats": "{{count}} איום/ות זוהו",
+      "suspicious": "{{count}} פריט/ים חשוד/ים",
+      "firewall": "חומת אש",
+      "grade": "ציון"
+    }
   },
   "report": {
     "title": "דוח סריקה",
@@ -62,6 +68,18 @@
     "summary": "סיכום",
     "details": "פרטים",
     "recommendations": "המלצות AI",
+    "tabs": {
+      "overview": "סקירה כללית",
+      "security": "אבטחה"
+    },
+    "security": {
+      "firewall": "חומת אש והגנה",
+      "defender": "Windows Defender",
+      "sigAge": "גיל חתימות",
+      "pendingUpdates": "עדכונים ממתינים",
+      "malware": "חשודים בתוכנות זדוניות",
+      "startup": "פריטי הפעלה"
+    },
     "actions": {
       "clean": "נקה",
       "backup": "גבה",

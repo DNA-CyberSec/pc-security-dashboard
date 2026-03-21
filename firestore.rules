@@ -26,6 +26,12 @@ service cloud.firestore {
         allow read:  if request.auth != null && request.auth.uid == uid;
         allow write: if false; // only written by Cloud Functions (Admin SDK)
       }
+
+      // Security summary subcollection — user reads, written by Cloud Functions
+      match /security/{doc} {
+        allow read:  if request.auth != null && request.auth.uid == uid;
+        allow write: if false; // only written by Cloud Functions (Admin SDK)
+      }
     }
 
     // ── Agent tokens ───────────────────────────────────────────────────────

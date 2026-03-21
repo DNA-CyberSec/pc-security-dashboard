@@ -131,6 +131,13 @@ exports.submitScan = onRequest(async (req, res) => {
   });
 
   // Mirror summary to agent/status for fast dashboard reads
+  const malwareSuspects  = scan.malwareSuspects  || [];
+  const startupSecurity  = scan.startupSecurity  || [];
+  const firewallStatus   = scan.firewallStatus   || {};
+  const threatCount      = malwareSuspects.filter(m => m.severity === "critical").length;
+  const suspiciousCount  = malwareSuspects.filter(m => m.severity === "warning").length
+                         + startupSecurity.filter(s => s.category === "suspicious").length;
+
   await db.collection("users").doc(uid)
     .collection("agent").doc("status")
     .set({
@@ -140,7 +147,23 @@ exports.submitScan = onRequest(async (req, res) => {
       suspiciousProcessCount: (scan.processes  || []).filter(p => p.suspicious).length,
       vulnerabilityCount:     (scan.vulnerabilities || []).length,
       storageWarning:         (scan.storage || []).some(d => d.usedPercent >= 80),
+      threatCount,
+      suspiciousCount,
+      firewallGrade:          firewallStatus.grade ?? null,
     }, { merge: true });
+
+  // Write security summary to /users/{uid}/security/current
+  await db.collection("users").doc(uid)
+    .collection("security").doc("current")
+    .set({
+      scanId:          scanRef.id,
+      updatedAt:       admin.firestore.FieldValue.serverTimestamp(),
+      malwareSuspects,
+      startupSecurity,
+      firewallStatus,
+      threatCount,
+      suspiciousCount,
+    });
 
   res.json({ ok: true, scanId: scanRef.id });
 });

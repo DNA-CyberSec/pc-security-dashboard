@@ -54,7 +54,13 @@
     "process": "Process",
     "justNow": "Just now",
     "minutesAgo": "{{n}}m ago",
-    "hoursAgo": "{{n}}h ago"
+    "hoursAgo": "{{n}}h ago",
+    "security": {
+      "threats": "{{count}} threat(s) detected",
+      "suspicious": "{{count}} suspicious item(s)",
+      "firewall": "Firewall",
+      "grade": "Grade"
+    }
   },
   "report": {
     "title": "Scan Report",
@@ -62,6 +68,18 @@
     "summary": "Summary",
     "details": "Details",
     "recommendations": "AI Recommendations",
+    "tabs": {
+      "overview": "Overview",
+      "security": "Security"
+    },
+    "security": {
+      "firewall": "Firewall & Protection",
+      "defender": "Windows Defender",
+      "sigAge": "Signature Age",
+      "pendingUpdates": "Pending Updates",
+      "malware": "Malware Suspects",
+      "startup": "Startup Items"
+    },
     "actions": {
       "clean": "Clean",
       "backup": "Backup",
