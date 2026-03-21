@@ -20,6 +20,12 @@ service cloud.firestore {
         allow read:  if request.auth != null && request.auth.uid == uid;
         allow write: if false; // only written by Cloud Functions (Admin SDK)
       }
+
+      // Realtime heartbeat subcollection — user reads, agent writes via Cloud Function
+      match /realtime/{doc} {
+        allow read:  if request.auth != null && request.auth.uid == uid;
+        allow write: if false; // only written by Cloud Functions (Admin SDK)
+      }
     }
 
     // ── Agent tokens ───────────────────────────────────────────────────────

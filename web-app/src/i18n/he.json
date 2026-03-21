@@ -38,7 +38,23 @@
       "good": "תקין",
       "warning": "דורש תשומת לב",
       "critical": "קריטי"
-    }
+    },
+    "live": "חי",
+    "cpu": "מעבד",
+    "ram": "זיכרון",
+    "disk": "דיסק",
+    "noAgentData": "ממתין לסוכן...",
+    "nextScan": "סריקה הבאה בעוד",
+    "topProcesses": "תהליכים מובילים",
+    "temperature": "טמפרטורה",
+    "tempNA": "לא נתמך במערכת זו",
+    "allClear": "הכל תקין ✓",
+    "issues": "{{count}} בעיה/ות",
+    "viewReport": "צפה בדוח המלא",
+    "process": "תהליך",
+    "justNow": "הרגע",
+    "minutesAgo": "לפני {{n}}ד׳",
+    "hoursAgo": "לפני {{n}}ש׳"
   },
   "report": {
     "title": "דוח סריקה",

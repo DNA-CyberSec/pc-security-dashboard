@@ -22,9 +22,10 @@ APP_REG_KEY     = "PCGuardAgent"
 IS_BUNDLED      = getattr(sys, "frozen", False)
 BACKGROUND_MODE = "--run" in sys.argv
 
-FUNCTIONS_BASE  = "https://us-central1-pc-security-dashboard.cloudfunctions.net"
-HEARTBEAT_URL   = f"{FUNCTIONS_BASE}/agentHeartbeat"
-SUBMIT_SCAN_URL = f"{FUNCTIONS_BASE}/submitScan"
+FUNCTIONS_BASE     = "https://us-central1-pc-security-dashboard.cloudfunctions.net"
+HEARTBEAT_URL      = f"{FUNCTIONS_BASE}/agentHeartbeat"
+SUBMIT_SCAN_URL    = f"{FUNCTIONS_BASE}/submitScan"
+REALTIME_URL       = f"{FUNCTIONS_BASE}/realtimeHeartbeat"
 
 # ── Route to correct mode ─────────────────────────────────────────────────────
 
@@ -136,12 +137,54 @@ if BACKGROUND_MODE:
         else:
             log.error(f"Scan upload failed: HTTP {status}")
 
+    def send_realtime_heartbeat():
+        """Lightweight 10-second heartbeat with CPU/RAM/processes/temps."""
+        try:
+            cpu = psutil.cpu_percent(interval=0.1)
+            mem = psutil.virtual_memory()
+
+            procs = []
+            for p in psutil.process_iter(["name", "cpu_percent", "memory_info"]):
+                try:
+                    procs.append({
+                        "name":   p.info["name"] or "",
+                        "cpu":    round(p.info["cpu_percent"] or 0, 1),
+                        "ram_mb": round((p.info["memory_info"].rss if p.info["memory_info"] else 0) / 1e6, 1),
+                    })
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    pass
+            top5 = sorted(procs, key=lambda x: x["cpu"], reverse=True)[:5]
+
+            temps = []
+            try:
+                raw = psutil.sensors_temperatures()
+                if raw:
+                    for name, entries in raw.items():
+                        for e in entries:
+                            temps.append({"label": e.label or name, "current": round(e.current, 1)})
+                    temps = temps[:8]
+            except Exception:
+                pass
+
+            _post(REALTIME_URL, {
+                "token":        AGENT_TOKEN,
+                "cpu_percent":  round(cpu, 1),
+                "ram_percent":  round(mem.percent, 1),
+                "ram_used_gb":  round(mem.used  / 1e9, 2),
+                "ram_total_gb": round(mem.total / 1e9, 2),
+                "top_processes": top5,
+                "temperatures":  temps,
+            })
+        except Exception as e:
+            log.debug(f"Realtime heartbeat error: {e}")
+
     def _agent_loop():
         """Runs in a background thread — heartbeat + scheduled scans."""
         send_heartbeat()
         run_scan()
         schedule.every(HEARTBEAT_SECS).seconds.do(send_heartbeat)
         schedule.every(SCAN_INTERVAL).seconds.do(run_scan)
+        schedule.every(10).seconds.do(send_realtime_heartbeat)
         log.info(f"PCGuard v{AGENT_VERSION} running (heartbeat={HEARTBEAT_SECS}s, scan={SCAN_INTERVAL}s)")
         while not _stop.is_set():
             if _scan_now.is_set():

@@ -38,7 +38,23 @@
       "good": "Good",
       "warning": "Needs Attention",
       "critical": "Critical"
-    }
+    },
+    "live": "LIVE",
+    "cpu": "CPU",
+    "ram": "RAM",
+    "disk": "Disk",
+    "noAgentData": "Waiting for agent...",
+    "nextScan": "Next scan in",
+    "topProcesses": "Top Processes",
+    "temperature": "Temperature",
+    "tempNA": "Not supported on this system",
+    "allClear": "All clear ✓",
+    "issues": "{{count}} issue(s)",
+    "viewReport": "View Full Report",
+    "process": "Process",
+    "justNow": "Just now",
+    "minutesAgo": "{{n}}m ago",
+    "hoursAgo": "{{n}}h ago"
   },
   "report": {
     "title": "Scan Report",

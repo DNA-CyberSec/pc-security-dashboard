@@ -40,9 +40,10 @@ SCAN_INTERVAL   = int(os.getenv("SCAN_INTERVAL",       "300"))  # seconds
 HEARTBEAT_SECS  = int(os.getenv("HEARTBEAT_INTERVAL",  "60"))
 READ_ONLY       = True
 
-FUNCTIONS_BASE  = "https://us-central1-pc-security-dashboard.cloudfunctions.net"
-HEARTBEAT_URL   = f"{FUNCTIONS_BASE}/agentHeartbeat"
-SUBMIT_SCAN_URL = f"{FUNCTIONS_BASE}/submitScan"
+FUNCTIONS_BASE     = "https://us-central1-pc-security-dashboard.cloudfunctions.net"
+HEARTBEAT_URL      = f"{FUNCTIONS_BASE}/agentHeartbeat"
+SUBMIT_SCAN_URL    = f"{FUNCTIONS_BASE}/submitScan"
+REALTIME_URL       = f"{FUNCTIONS_BASE}/realtimeHeartbeat"
 REQUEST_TIMEOUT = 30  # seconds
 
 # ── Logging ───────────────────────────────────────────────────────────────────
@@ -179,6 +180,45 @@ def main():
         log.error("─" * 60)
         sys.exit(1)
 
+    def send_realtime_heartbeat():
+        try:
+            cpu = psutil.cpu_percent(interval=0.1)
+            mem = psutil.virtual_memory()
+            procs = []
+            for p in psutil.process_iter(["name", "cpu_percent", "memory_info"]):
+                try:
+                    procs.append({
+                        "name":   p.info["name"] or "",
+                        "cpu":    round(p.info["cpu_percent"] or 0, 1),
+                        "ram_mb": round((p.info["memory_info"].rss if p.info["memory_info"] else 0) / 1e6, 1),
+                    })
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    pass
+            top5 = sorted(procs, key=lambda x: x["cpu"], reverse=True)[:5]
+            temps = []
+            try:
+                raw = psutil.sensors_temperatures()
+                if raw:
+                    for name, entries in raw.items():
+                        for e in entries:
+                            temps.append({"label": e.label or name, "current": round(e.current, 1)})
+                    temps = temps[:8]
+            except Exception:
+                pass
+            r = requests.post(REALTIME_URL, json={
+                "token":         AGENT_TOKEN,
+                "cpu_percent":   round(cpu, 1),
+                "ram_percent":   round(mem.percent, 1),
+                "ram_used_gb":   round(mem.used  / 1e9, 2),
+                "ram_total_gb":  round(mem.total / 1e9, 2),
+                "top_processes": top5,
+                "temperatures":  temps,
+            }, timeout=10)
+            if r.status_code != 200:
+                log.debug(f"Realtime heartbeat: {r.status_code}")
+        except Exception as e:
+            log.debug(f"Realtime heartbeat error: {e}")
+
     # Run immediately on startup
     send_heartbeat()
     run_scan()
@@ -186,6 +226,7 @@ def main():
     # Schedule recurring tasks
     schedule.every(HEARTBEAT_SECS).seconds.do(send_heartbeat)
     schedule.every(SCAN_INTERVAL).seconds.do(run_scan)
+    schedule.every(10).seconds.do(send_realtime_heartbeat)
 
     log.info(f"Heartbeat every {HEARTBEAT_SECS}s | Scan every {SCAN_INTERVAL}s")
     log.info("Agent running. Press Ctrl+C to stop.")

@@ -145,6 +145,34 @@ exports.submitScan = onRequest(async (req, res) => {
   res.json({ ok: true, scanId: scanRef.id });
 });
 
+// ── realtimeHeartbeat ─────────────────────────────────────────────────────────
+// Called by the agent every 10 seconds with lightweight CPU/RAM/process data.
+// Writes to /users/{uid}/realtime/status for live dashboard updates.
+
+exports.realtimeHeartbeat = onRequest(async (req, res) => {
+  res.set("Access-Control-Allow-Origin", "*");
+  if (req.method === "OPTIONS") { res.status(204).send(""); return; }
+  if (req.method !== "POST")    { res.status(405).json({ error: "POST required" }); return; }
+
+  const { token, cpu_percent, ram_percent, ram_used_gb, ram_total_gb,
+          top_processes, temperatures } = req.body;
+
+  const uid = await resolveToken(token);
+  if (!uid) return res.status(401).json({ error: "Invalid or unknown AgentToken" });
+
+  await admin.firestore().doc(`users/${uid}/realtime/status`).set({
+    cpu_percent:   cpu_percent   ?? null,
+    ram_percent:   ram_percent   ?? null,
+    ram_used_gb:   ram_used_gb   ?? null,
+    ram_total_gb:  ram_total_gb  ?? null,
+    top_processes: top_processes ?? [],
+    temperatures:  temperatures  ?? [],
+    updatedAt:     admin.firestore.FieldValue.serverTimestamp(),
+  });
+
+  res.json({ ok: true });
+});
+
 // ── getScanRecommendations ────────────────────────────────────────────────────
 
 exports.getScanRecommendations = onCall(
