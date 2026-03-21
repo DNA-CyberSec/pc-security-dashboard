@@ -38,6 +38,7 @@ if BACKGROUND_MODE:
     import logging
     import threading
     import webbrowser
+    import winreg
     import requests
     import schedule
     import pystray
@@ -69,18 +70,54 @@ if BACKGROUND_MODE:
     SCAN_INTERVAL   = int(CONFIG.get("scan_interval",    300))
     HEARTBEAT_SECS  = int(CONFIG.get("heartbeat_interval", 60))
 
-    # Device identity — generated once and persisted in config.json
-    DEVICE_ID   = CONFIG.get("device_id", "")
+    def _resolve_device_id():
+        """
+        Returns a permanent, hardware-based device ID for this Windows PC.
+        Priority: MachineGuid (survives reinstalls) → MAC-UUID → saved ID → new UUID
+        """
+        # 1. Windows MachineGuid — immutable per-machine GUID set during Windows install
+        try:
+            k = winreg.OpenKey(
+                winreg.HKEY_LOCAL_MACHINE,
+                r"SOFTWARE\Microsoft\Cryptography",
+                0,
+                winreg.KEY_READ | winreg.KEY_WOW64_64KEY,
+            )
+            guid, _ = winreg.QueryValueEx(k, "MachineGuid")
+            winreg.CloseKey(k)
+            if guid and guid.strip():
+                return guid.strip().lower()
+        except Exception:
+            pass
+
+        # 2. Primary NIC MAC address → deterministic UUID (no registry needed)
+        try:
+            mac = uuid.getnode()
+            if not (mac >> 40) & 1:  # skip multicast / random MACs
+                return str(uuid.uuid5(uuid.NAMESPACE_DNS, str(mac)))
+        except Exception:
+            pass
+
+        # 3. Previously saved ID (backward compat — keeps existing installs stable)
+        saved = CONFIG.get("device_id", "").strip()
+        if saved:
+            return saved
+
+        # 4. Last resort: new random UUID
+        return str(uuid.uuid4())
+
     DEVICE_NAME = os.environ.get("COMPUTERNAME", socket.gethostname())
-    if not DEVICE_ID:
-        DEVICE_ID = str(uuid.uuid4())
+    DEVICE_ID   = _resolve_device_id()
+
+    # Persist resolved ID so future runs are instant (even if registry is inaccessible)
+    if CONFIG.get("device_id") != DEVICE_ID:
         CONFIG["device_id"] = DEVICE_ID
         try:
             with open(CONFIG_FILE, "w") as f:
                 json.dump(CONFIG, f, indent=2)
-            log.info(f"Generated device ID: {DEVICE_ID}")
         except Exception as e:
-            log.warning(f"Could not save device ID to config.json: {e}")
+            log.warning(f"Could not save device ID: {e}")
+    log.info(f"Device ID: {DEVICE_ID}  Name: {DEVICE_NAME}")
 
     # Events for inter-thread signalling
     _scan_now  = threading.Event()   # set by "Run Scan Now" tray menu item

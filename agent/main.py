@@ -24,6 +24,7 @@ import socket
 import logging
 import requests
 import schedule
+import winreg
 from dotenv import load_dotenv
 
 from modules.scanner   import Scanner
@@ -41,22 +42,56 @@ SCAN_INTERVAL   = int(os.getenv("SCAN_INTERVAL",       "300"))  # seconds
 HEARTBEAT_SECS  = int(os.getenv("HEARTBEAT_INTERVAL",  "60"))
 READ_ONLY       = True
 
-# Device identity — persisted in device_id.txt next to main.py
+# Device identity — hardware-based, survives reinstalls
 _DEVICE_ID_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "device_id.txt")
 
-def _get_or_create_device_id():
+def _get_stable_device_id():
+    """
+    Returns a permanent, hardware-based ID for this PC.
+    Priority: MachineGuid → MAC-UUID → saved file → new UUID
+    """
+    # 1. Windows MachineGuid — immutable, set during Windows install
+    try:
+        k = winreg.OpenKey(
+            winreg.HKEY_LOCAL_MACHINE,
+            r"SOFTWARE\Microsoft\Cryptography",
+            0,
+            winreg.KEY_READ | winreg.KEY_WOW64_64KEY,
+        )
+        guid, _ = winreg.QueryValueEx(k, "MachineGuid")
+        winreg.CloseKey(k)
+        if guid and guid.strip():
+            return guid.strip().lower()
+    except Exception:
+        pass
+
+    # 2. Primary NIC MAC address → deterministic UUID
+    try:
+        mac = uuid.getnode()
+        if not (mac >> 40) & 1:  # skip multicast / random MACs
+            return str(uuid.uuid5(uuid.NAMESPACE_DNS, str(mac)))
+    except Exception:
+        pass
+
+    # 3. Previously saved device_id.txt (backward compat)
     if os.path.exists(_DEVICE_ID_FILE):
         with open(_DEVICE_ID_FILE) as f:
             did = f.read().strip()
         if did:
             return did
-    did = str(uuid.uuid4())
-    with open(_DEVICE_ID_FILE, "w") as f:
-        f.write(did)
-    return did
 
-DEVICE_ID   = _get_or_create_device_id()
+    # 4. New UUID (last resort)
+    return str(uuid.uuid4())
+
+DEVICE_ID   = _get_stable_device_id()
 DEVICE_NAME = os.environ.get("COMPUTERNAME", socket.gethostname())
+
+# Cache resolved ID for fast startup
+try:
+    with open(_DEVICE_ID_FILE, "w") as _f:
+        _f.write(DEVICE_ID)
+except Exception:
+    pass
 
 FUNCTIONS_BASE     = "https://us-central1-pc-security-dashboard.cloudfunctions.net"
 HEARTBEAT_URL      = f"{FUNCTIONS_BASE}/agentHeartbeat"

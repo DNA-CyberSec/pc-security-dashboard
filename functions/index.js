@@ -92,11 +92,13 @@ exports.agentHeartbeat = onRequest(async (req, res) => {
 
   const did = sanitizeDeviceId(deviceId || hostname);
 
+  const resolvedName = deviceName || hostname || "unknown";
+
   await db.collection("users").doc(uid)
     .collection("devices").doc(did)
     .set({
       deviceId:      did,
-      name:          deviceName || hostname || "unknown",
+      name:          resolvedName,
       os:            osName || "Windows",
       lastHeartbeat: admin.firestore.FieldValue.serverTimestamp(),
       last_seen:     admin.firestore.FieldValue.serverTimestamp(),
@@ -104,6 +106,26 @@ exports.agentHeartbeat = onRequest(async (req, res) => {
       readOnlyMode:  readOnlyMode !== false,
       online:        true,
     }, { merge: true });
+
+  // Auto-deduplicate: if another doc has the same COMPUTERNAME, delete it
+  if (resolvedName !== "unknown") {
+    try {
+      const dupeSnap = await db.collection("users").doc(uid)
+        .collection("devices")
+        .where("name", "==", resolvedName)
+        .get();
+      if (dupeSnap.size > 1) {
+        const batch = db.batch();
+        dupeSnap.docs
+          .filter(d => d.id !== did)
+          .forEach(d => batch.delete(d.ref));
+        await batch.commit();
+        console.log(`Deduped ${dupeSnap.size - 1} stale device(s) for uid=${uid} name="${resolvedName}"`);
+      }
+    } catch (e) {
+      console.warn("Dedup check failed:", e.message);
+    }
+  }
 
   res.json({ ok: true });
 });
@@ -261,6 +283,41 @@ exports.explainIssue = onCall(
     return { explanation };
   }
 );
+
+// ── cleanupDuplicateDevices ───────────────────────────────────────────────────
+// Callable: groups /users/{uid}/devices by COMPUTERNAME, keeps the most-recently-seen
+// entry per name, deletes the rest.  Safe to call at any time.
+
+exports.cleanupDuplicateDevices = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "Authentication required");
+
+  const uid        = request.auth.uid;
+  const devicesSnap = await db.collection("users").doc(uid).collection("devices").get();
+
+  if (devicesSnap.empty) return { deleted: 0 };
+
+  // Group by COMPUTERNAME (name field)
+  const byName = {};
+  devicesSnap.docs.forEach(d => {
+    const name = (d.data().name || "").toLowerCase().trim();
+    if (!name) return;
+    if (!byName[name]) byName[name] = [];
+    byName[name].push({ id: d.id, ref: d.ref, ts: d.data().last_seen?.toMillis?.() ?? 0 });
+  });
+
+  let deleted = 0;
+  const batch  = db.batch();
+
+  for (const group of Object.values(byName)) {
+    if (group.length <= 1) continue;
+    // Sort descending by last_seen — keep index 0 (freshest), delete the rest
+    group.sort((a, b) => b.ts - a.ts);
+    group.slice(1).forEach(({ ref }) => { batch.delete(ref); deleted++; });
+  }
+
+  if (deleted > 0) await batch.commit();
+  return { deleted };
+});
 
 // ── onScanCreated ─────────────────────────────────────────────────────────────
 // Triggers when a new scan is written. Auto-generates AI recommendations.
