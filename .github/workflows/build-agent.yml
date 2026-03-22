@@ -88,6 +88,26 @@ jobs:
 
             > Windows 10/11 · Ubuntu 18+ · Debian 10+ · No technical knowledge needed
 
+      - name: Update latestAgentVersion in Firestore
+        shell: bash
+        env:
+          DEPLOY_SECRET: ${{ secrets.DEPLOY_SECRET }}
+        run: |
+          VERSION="${{ steps.version.outputs.VERSION }}"
+          echo "Updating Firestore version to ${VERSION}..."
+          RESPONSE=$(curl -sS -w "\n%{http_code}" -X POST \
+            "https://us-central1-pc-security-dashboard.cloudfunctions.net/setLatestAgentVersion" \
+            -H "Content-Type: application/json" \
+            -d "{\"secret\":\"${DEPLOY_SECRET}\",\"windows_version\":\"${VERSION}\",\"linux_version\":\"${VERSION}\",\"changelog\":\"PCGuard v${VERSION}\"}")
+          HTTP_CODE=$(echo "${RESPONSE}" | tail -1)
+          BODY=$(echo "${RESPONSE}" | head -1)
+          echo "Response body: ${BODY}"
+          echo "HTTP status:   ${HTTP_CODE}"
+          if [ "${HTTP_CODE}" != "200" ]; then
+            echo "::error::setLatestAgentVersion returned HTTP ${HTTP_CODE}"
+            exit 1
+          fi
+
   build-linux:
     runs-on: ubuntu-latest
     permissions:
@@ -126,9 +146,20 @@ jobs:
           omitBody: true
 
       - name: Update latestAgentVersion in Firestore
+        env:
+          DEPLOY_SECRET: ${{ secrets.DEPLOY_SECRET }}
         run: |
           VERSION="${{ steps.version.outputs.VERSION }}"
-          curl -sSf -X POST \
+          echo "Updating Firestore version to ${VERSION}..."
+          RESPONSE=$(curl -sS -w "\n%{http_code}" -X POST \
             "https://us-central1-pc-security-dashboard.cloudfunctions.net/setLatestAgentVersion" \
             -H "Content-Type: application/json" \
-            -d "{\"secret\":\"${{ secrets.DEPLOY_SECRET }}\",\"windows_version\":\"${VERSION}\",\"linux_version\":\"${VERSION}\",\"changelog\":\"PCGuard v${VERSION}\"}"
+            -d "{\"secret\":\"${DEPLOY_SECRET}\",\"windows_version\":\"${VERSION}\",\"linux_version\":\"${VERSION}\",\"changelog\":\"PCGuard v${VERSION}\"}")
+          HTTP_CODE=$(echo "${RESPONSE}" | tail -1)
+          BODY=$(echo "${RESPONSE}" | head -1)
+          echo "Response body: ${BODY}"
+          echo "HTTP status:   ${HTTP_CODE}"
+          if [ "${HTTP_CODE}" != "200" ]; then
+            echo "::error::setLatestAgentVersion returned HTTP ${HTTP_CODE}"
+            exit 1
+          fi
