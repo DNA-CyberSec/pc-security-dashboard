@@ -47,6 +47,7 @@ if BACKGROUND_MODE:
     import threading
     import webbrowser
     import winreg
+    import psutil
     import requests
     import schedule
     import pystray
