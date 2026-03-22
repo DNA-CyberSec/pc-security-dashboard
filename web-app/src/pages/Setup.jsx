@@ -6,16 +6,18 @@ import { functions } from "../firebase";
 
 const AGENT_DOWNLOAD_URL =
   "https://github.com/DNA-CyberSec/pc-security-dashboard/releases/latest/download/PCGuard-Setup.exe";
+const LINUX_INSTALL_CMD  = "curl -sSL https://pcguard-rami.web.app/install.sh | bash";
 
 export default function Setup({ user }) {
   const { t, i18n } = useTranslation();
   const navigate     = useNavigate();
   const isRTL        = i18n.language === "he";
 
-  const [token,   setToken]   = useState("");
-  const [copied,  setCopied]  = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [error,   setError]   = useState(null);
+  const [token,         setToken]         = useState("");
+  const [copied,        setCopied]        = useState(false);
+  const [copiedLinux,   setCopiedLinux]   = useState(false);
+  const [loading,       setLoading]       = useState(true);
+  const [error,         setError]         = useState(null);
 
   useEffect(() => {
     (async () => {
@@ -32,20 +34,22 @@ export default function Setup({ user }) {
     })();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const copyToken = async () => {
+  const copyText = async (text, setDone) => {
     try {
-      await navigator.clipboard.writeText(token);
+      await navigator.clipboard.writeText(text);
     } catch {
       const el = document.createElement("textarea");
-      el.value = token;
+      el.value = text;
       document.body.appendChild(el);
       el.select();
       document.execCommand("copy");
       document.body.removeChild(el);
     }
-    setCopied(true);
-    setTimeout(() => setCopied(false), 3000);
+    setDone(true);
+    setTimeout(() => setDone(false), 3000);
   };
+
+  const copyToken = () => copyText(token, setCopied);
 
   const toggleLang = () => {
     const l = i18n.language === "en" ? "he" : "en";
@@ -136,6 +140,47 @@ export default function Setup({ user }) {
                 {t("setup.goToDashboard")} →
               </button>
             </div>
+          </div>
+
+          {/* ── Linux separator ───────────────────────────────────────── */}
+          <div style={s.divider}>
+            <span style={s.dividerText}>— {t("linux.linuxServer")} —</span>
+          </div>
+
+          {/* Linux hero */}
+          <div style={{ ...s.downloadCard, borderColor: "#30363d", background: "#161b22" }}>
+            <div style={{ fontSize: 48, marginBottom: 8 }}>🐧</div>
+            <h2 style={{ fontSize: 20, fontWeight: 700, color: "#e2e8f0", margin: "0 0 8px" }}>
+              {t("linux.installCmd")}
+            </h2>
+            <p style={{ fontSize: 14, color: "#8b949e", margin: "0 0 20px", maxWidth: 480 }}>
+              {t("linux.installDesc")}
+            </p>
+
+            {/* Steps */}
+            <div style={{ ...s.miniSteps, width: "100%", maxWidth: 520, marginBottom: 20 }}>
+              <div style={s.miniStep}>1. {t("linux.installStep1")}</div>
+              <div style={s.miniStep}>2. {t("linux.installStep2")}</div>
+            </div>
+
+            {/* Install command */}
+            <div style={s.cmdBlock}>
+              <code style={s.cmdCode}>{LINUX_INSTALL_CMD}</code>
+              <button
+                onClick={() => copyText(LINUX_INSTALL_CMD, setCopiedLinux)}
+                style={{ ...s.copyBtn, ...(copiedLinux ? s.copyBtnDone : {}), flexShrink: 0 }}
+              >
+                {copiedLinux ? "✓ " + t("setup.copied") : "📋 " + t("setup.copy")}
+              </button>
+            </div>
+
+            <div style={{ ...s.miniSteps, width: "100%", maxWidth: 520, marginTop: 8 }}>
+              <div style={s.miniStep}>3. {t("linux.installStep3")}</div>
+            </div>
+
+            <p style={{ fontSize: 11, color: "#4a5568", marginTop: 12 }}>
+              Ubuntu 18+ · Debian 10+ · Requires root (sudo)
+            </p>
           </div>
 
         </div>
@@ -236,5 +281,20 @@ const s = {
     background: "#1f6feb", color: "#fff", border: "none",
     borderRadius: 8, padding: "13px 28px", cursor: "pointer",
     fontSize: 15, fontWeight: 700, marginTop: 4,
+  },
+  divider: {
+    display: "flex", alignItems: "center", justifyContent: "center",
+    margin: "8px 0",
+  },
+  dividerText: { fontSize: 13, color: "#4a5568" },
+  cmdBlock: {
+    display: "flex", alignItems: "center", gap: 12, width: "100%",
+    maxWidth: 520, flexWrap: "wrap",
+  },
+  cmdCode: {
+    fontFamily: "monospace", fontSize: 13,
+    background: "#0d1117", border: "1px solid #30363d",
+    borderRadius: 8, padding: "10px 14px",
+    color: "#48bb78", wordBreak: "break-all", flex: 1,
   },
 };

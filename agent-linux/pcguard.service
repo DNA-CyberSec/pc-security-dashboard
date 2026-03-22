@@ -1,0 +1,16 @@
+[Unit]
+Description=PC Guard Security Agent
+Documentation=https://pcguard-rami.web.app
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /opt/pcguard/linux_agent.py
+Restart=always
+RestartSec=10
+StandardOutput=append:/opt/pcguard/agent.log
+StandardError=append:/opt/pcguard/agent.log
+
+[Install]
+WantedBy=multi-user.target

@@ -37,6 +37,12 @@ service cloud.firestore {
           allow read:  if request.auth != null && request.auth.uid == uid;
           allow write: if false;
         }
+
+        // Linux agent commands — queued by Cloud Functions, read by client for status
+        match /commands/{commandId} {
+          allow read:  if request.auth != null && request.auth.uid == uid;
+          allow write: if false;
+        }
       }
     }
 

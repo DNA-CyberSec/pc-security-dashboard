@@ -2,8 +2,9 @@ import React, { useEffect, useState, useRef, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate, useParams } from "react-router-dom";
 import { signOut } from "firebase/auth";
-import { doc, getDoc, onSnapshot, setDoc } from "firebase/firestore";
-import { auth, db } from "../firebase";
+import { collection, doc, getDoc, onSnapshot, setDoc } from "firebase/firestore";
+import { httpsCallable } from "firebase/functions";
+import { auth, db, functions } from "../firebase";
 
 // ── Circular SVG Gauge ────────────────────────────────────────────────────────
 
@@ -108,6 +109,190 @@ function formatAgo(ts, t) {
   if (diff < 3600) return t("dashboard.minutesAgo", { n: Math.floor(diff / 60) });
   if (diff < 86400) return t("dashboard.hoursAgo",  { n: Math.floor(diff / 3600) });
   return date.toLocaleDateString();
+}
+
+// ── Linux Security Tab ────────────────────────────────────────────────────────
+
+function LinuxSecurityTab({ scan, deviceId, commands, cmdLoading, sendCommand, t }) {
+  const [blockInput, setBlockInput] = useState("");
+
+  if (!scan) {
+    return (
+      <div style={{ padding: "40px 0", textAlign: "center", color: "#4a5568" }}>
+        {t("linux.noScanData")}
+      </div>
+    );
+  }
+
+  const sshFails   = scan.sshFailedLogins  || {};
+  const topIPs     = sshFails.top_ips      || [];
+  const logins     = scan.recentLogins     || [];
+  const sudoUsers  = scan.sudoUsers        || [];
+  const suidFiles  = scan.suidSuspect      || [];
+  const fw         = scan.firewallStatus   || {};
+
+  const getCommandStatus = (type, ip = "") => {
+    const match = commands.find(c =>
+      c.type === type && (type === "block_ip" ? c.ip === ip : true) &&
+      ["pending","in_progress","done"].includes(c.status)
+    );
+    return match?.status || null;
+  };
+
+  const isBlocked = (ip) => {
+    const st = getCommandStatus("block_ip", ip);
+    return st === "done";
+  };
+
+  const isPending = (ip) => {
+    const st = getCommandStatus("block_ip", ip);
+    return st === "pending" || st === "in_progress";
+  };
+
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 16, marginBottom: 24 }}>
+
+      {/* Brute Force */}
+      <div style={s.infoCard}>
+        <p style={s.cardTitle}>{t("linux.bruteForce")}</p>
+        <div style={{ display: "flex", gap: 24, marginBottom: 16 }}>
+          <div>
+            <p style={{ ...s.bigVal, color: sshFails.total > 50 ? "#fc8181" : sshFails.total > 10 ? "#f6ad55" : "#e2e8f0" }}>
+              {sshFails.total ?? 0}
+            </p>
+            <p style={s.muted}>{t("linux.failedLogins")}</p>
+          </div>
+          <div>
+            <p style={{ ...s.bigVal, color: "#f6ad55" }}>{sshFails.unique_ips ?? 0}</p>
+            <p style={s.muted}>{t("linux.attackingIPs")}</p>
+          </div>
+        </div>
+
+        {topIPs.length > 0 && (
+          <>
+            <p style={{ ...s.cardTitle, marginBottom: 8 }}>{t("linux.topAttackers")}</p>
+            {topIPs.slice(0, 5).map((item, i) => (
+              <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center",
+                                    padding: "6px 0", borderBottom: "1px solid #21262d" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ fontFamily: "monospace", fontSize: 13, color: "#fc8181" }}>{item.ip}</span>
+                  <span style={{ fontSize: 11, color: "#8b949e" }}>×{item.count}</span>
+                </div>
+                <button
+                  disabled={isBlocked(item.ip) || isPending(item.ip) || cmdLoading[`block_ip-${item.ip}`]}
+                  onClick={() => sendCommand("block_ip", { ip: item.ip })}
+                  style={{
+                    fontSize: 11, padding: "3px 10px", borderRadius: 6, cursor: "pointer", border: "none",
+                    background: isBlocked(item.ip) ? "#0d2818" : "#2d1b1b",
+                    color:      isBlocked(item.ip) ? "#56d364"  : "#fc8181",
+                    opacity:    isPending(item.ip) ? 0.6 : 1,
+                  }}
+                >
+                  {isBlocked(item.ip)  ? t("linux.blocked")
+                   : isPending(item.ip) ? t("linux.blocking")
+                   : t("linux.blockIP")}
+                </button>
+              </div>
+            ))}
+          </>
+        )}
+
+        {/* Manual block */}
+        <div style={{ marginTop: 14, display: "flex", gap: 8 }}>
+          <input
+            value={blockInput}
+            onChange={e => setBlockInput(e.target.value)}
+            placeholder="1.2.3.4"
+            style={{ ...s.nicknameInput, flex: 1, fontSize: 12 }}
+          />
+          <button
+            disabled={!blockInput.trim() || cmdLoading[`block_ip-${blockInput.trim()}`]}
+            onClick={() => { sendCommand("block_ip", { ip: blockInput.trim() }); setBlockInput(""); }}
+            style={{ background: "#742a2a", color: "#fc8181", border: "none",
+                     borderRadius: 6, padding: "4px 12px", cursor: "pointer", fontSize: 12 }}
+          >
+            {t("linux.blockIP")}
+          </button>
+        </div>
+      </div>
+
+      {/* Access Log + Privilege */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+
+        {/* Recent Logins */}
+        <div style={s.infoCard}>
+          <p style={s.cardTitle}>{t("linux.recentLogins")}</p>
+          {logins.length === 0 ? (
+            <p style={s.muted}>{t("linux.noRecentLogins")}</p>
+          ) : (
+            logins.slice(0, 5).map((l, i) => (
+              <div key={i} style={{ display: "flex", justifyContent: "space-between",
+                                    padding: "5px 0", borderBottom: "1px solid #21262d" }}>
+                <span style={{ fontSize: 12, color: "#c9d1d9", fontFamily: "monospace" }}>{l.user}</span>
+                <span style={{ fontSize: 11, color: "#8b949e" }}>{l.ip_or_tty}</span>
+                <span style={{ fontSize: 11, color: "#4a5568" }}>{l.time_str}</span>
+              </div>
+            ))
+          )}
+        </div>
+
+        {/* Sudo Users */}
+        <div style={s.infoCard}>
+          <p style={s.cardTitle}>{t("linux.privilege")}</p>
+          <p style={s.muted}>{t("linux.sudoUsers")}:</p>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, margin: "8px 0 12px" }}>
+            {sudoUsers.length === 0 ? (
+              <span style={s.muted}>—</span>
+            ) : sudoUsers.map((u, i) => (
+              <span key={i} style={{ fontSize: 11, background: "#0d2818", border: "1px solid #238636",
+                                     color: "#56d364", borderRadius: 4, padding: "2px 8px" }}>
+                {u}
+              </span>
+            ))}
+          </div>
+          <p style={s.muted}>{t("linux.suidFiles")}:</p>
+          {suidFiles.length === 0 ? (
+            <p style={{ fontSize: 12, color: "#48bb78" }}>{t("linux.noSuidFiles")}</p>
+          ) : (
+            suidFiles.map((f, i) => (
+              <p key={i} style={{ fontSize: 11, color: "#fc8181", fontFamily: "monospace", margin: "2px 0" }}>{f}</p>
+            ))
+          )}
+        </div>
+      </div>
+
+      {/* Firewall UFW — full width */}
+      <div style={{ ...s.infoCard, gridColumn: "1 / -1" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <p style={s.cardTitle}>{t("linux.firewall")}</p>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <span style={{ fontSize: 14, fontWeight: 700,
+                           color: fw.active ? "#56d364" : "#fc8181" }}>
+              {fw.active ? t("linux.firewallActive") : t("linux.firewallInactive")}
+            </span>
+            {!fw.active && (
+              <button
+                disabled={getCommandStatus("enable_ufw") === "pending" || getCommandStatus("enable_ufw") === "in_progress"
+                          || cmdLoading["enable_ufw-"]}
+                onClick={() => sendCommand("enable_ufw")}
+                style={{ background: "#1f6feb", color: "#fff", border: "none",
+                         borderRadius: 6, padding: "6px 14px", cursor: "pointer", fontSize: 12 }}
+              >
+                {(getCommandStatus("enable_ufw") === "pending" || getCommandStatus("enable_ufw") === "in_progress")
+                  ? t("linux.enablingUFW") : t("linux.enableUFW")}
+              </button>
+            )}
+          </div>
+        </div>
+        {fw.rules_count != null && (
+          <p style={{ ...s.muted, marginTop: 8 }}>
+            {t("linux.rulesCount", { n: fw.rules_count })}
+          </p>
+        )}
+      </div>
+
+    </div>
+  );
 }
 
 // ── Latency Bar Chart ─────────────────────────────────────────────────────────
@@ -312,10 +497,13 @@ export default function DeviceDashboard({ user }) {
   const [loading,       setLoading]       = useState(true);
   const [editingName,   setEditingName]   = useState(false);
   const [nicknameInput, setNicknameInput] = useState("");
-  const [activeTab,     setActiveTab]     = useState("overview"); // "overview" | "network"
+  const [activeTab,     setActiveTab]     = useState("overview"); // "overview" | "network" | "security"
+  const [commands,      setCommands]      = useState([]);
+  const [cmdLoading,    setCmdLoading]    = useState({});   // commandId → bool
 
   const realtimeUnsubRef = useRef(null);
   const networkUnsubRef  = useRef(null);
+  const commandsUnsubRef = useRef(null);
   const lastScanIdRef    = useRef(null);
 
   // Load scan by ID
@@ -392,6 +580,33 @@ export default function DeviceDashboard({ user }) {
       unsubscribeNetwork();
     };
   }, [subscribeNetwork, unsubscribeNetwork]);
+
+  // Commands subscription (for Linux agent command queue)
+  useEffect(() => {
+    if (!deviceDoc || deviceDoc.os !== "Linux") return;
+    if (commandsUnsubRef.current) return;
+    commandsUnsubRef.current = onSnapshot(
+      collection(db, "users", user.uid, "devices", deviceId, "commands"),
+      (snap) => setCommands(snap.docs.map(d => ({ id: d.id, ...d.data() }))),
+    );
+    return () => {
+      commandsUnsubRef.current?.();
+      commandsUnsubRef.current = null;
+    };
+  }, [user.uid, deviceId, deviceDoc]);
+
+  const sendCommand = async (type, payload = {}) => {
+    const key = `${type}-${payload.ip || ""}`;
+    setCmdLoading(prev => ({ ...prev, [key]: true }));
+    try {
+      const fn = httpsCallable(functions, "sendLinuxCommand");
+      await fn({ deviceId, type, ...payload });
+    } catch (err) {
+      console.error("sendCommand error:", err);
+    } finally {
+      setCmdLoading(prev => ({ ...prev, [key]: false }));
+    }
+  };
 
   const saveNickname = async () => {
     const nickname = nicknameInput.trim();
@@ -531,13 +746,17 @@ export default function DeviceDashboard({ user }) {
 
         {/* ── Tab bar ───────────────────────────────────────────────────── */}
         <div style={s.tabBar}>
-          {["overview", "network"].map(tab => (
+          {[
+            { id: "overview",  label: `📊 ${t("report.tabs.overview")}` },
+            { id: "network",   label: `🌐 ${t("network.title")}` },
+            ...(deviceDoc?.os === "Linux" ? [{ id: "security", label: `🛡️ ${t("dashboard.sections.security")}` }] : []),
+          ].map(tab => (
             <button
-              key={tab}
-              onClick={() => setActiveTab(tab)}
-              style={{ ...s.tabBtn, ...(activeTab === tab ? s.tabBtnActive : {}) }}
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              style={{ ...s.tabBtn, ...(activeTab === tab.id ? s.tabBtnActive : {}) }}
             >
-              {tab === "overview" ? `📊 ${t("report.tabs.overview")}` : `🌐 ${t("network.title")}`}
+              {tab.label}
             </button>
           ))}
         </div>
@@ -567,8 +786,16 @@ export default function DeviceDashboard({ user }) {
         </div>
 
         {/* ── ROW 2: Info cards (Overview tab) ──────────────────────────── */}
-        {activeTab === "network" ? (
-          <NetworkTab networkData={networkData} t={t} />
+        {activeTab === "network"  ? <NetworkTab networkData={networkData} t={t} /> : null}
+        {activeTab === "security" ? (
+          <LinuxSecurityTab
+            scan={latestScan}
+            deviceId={deviceId}
+            commands={commands}
+            cmdLoading={cmdLoading}
+            sendCommand={sendCommand}
+            t={t}
+          />
         ) : null}
         <div style={{ ...s.cardRow, display: activeTab === "overview" ? s.cardRow.display : "none" }}>
 

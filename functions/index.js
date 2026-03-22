@@ -235,8 +235,14 @@ exports.realtimeHeartbeat = onRequest(async (req, res) => {
     updatedAt:     now,
   });
 
-  // Keep device online status fresh
-  const deviceUpdate = { last_seen: now, online: true };
+  // Keep device online status fresh; include Linux-specific fields if present
+  const deviceUpdate = {
+    last_seen:     now,
+    online:        true,
+    ...(req.body.uptime_seconds    != null && { uptime_seconds:    req.body.uptime_seconds }),
+    ...(req.body.ssh_failed_logins != null && { ssh_failed_logins: req.body.ssh_failed_logins }),
+    ...(req.body.firewall_active   != null && { firewall_active:   req.body.firewall_active }),
+  };
 
   // Handle network data
   if (network && typeof network === "object") {
@@ -279,7 +285,21 @@ exports.realtimeHeartbeat = onRequest(async (req, res) => {
 
   await deviceRef.set(deviceUpdate, { merge: true });
 
-  res.json({ ok: true });
+  // Return any pending commands for this device (Linux agent polls these)
+  let pendingCommands = [];
+  try {
+    const cmdSnap = await deviceRef.collection("commands")
+      .where("status", "==", "pending").limit(5).get();
+    if (!cmdSnap.empty) {
+      pendingCommands = cmdSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+      // Mark as in_progress so they won't be re-sent
+      const batch = db.batch();
+      cmdSnap.docs.forEach(d => batch.update(d.ref, { status: "in_progress" }));
+      await batch.commit();
+    }
+  } catch (_) {}
+
+  res.json({ ok: true, pendingCommands });
 });
 
 // ── getScanRecommendations ────────────────────────────────────────────────────
@@ -399,3 +419,76 @@ exports.onScanCreated = onDocumentCreated(
     }
   }
 );
+
+// ── sendLinuxCommand ──────────────────────────────────────────────────────────
+// Callable (auth required): queues a command for the Linux agent to execute.
+// Supported types: "block_ip" (payload: {ip}), "enable_ufw" (no payload needed)
+
+exports.sendLinuxCommand = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "Authentication required");
+
+  const { deviceId, type, ip } = request.data;
+  if (!deviceId) throw new HttpsError("invalid-argument", "deviceId required");
+  if (!type)     throw new HttpsError("invalid-argument", "type required");
+
+  const ALLOWED_TYPES = ["block_ip", "enable_ufw"];
+  if (!ALLOWED_TYPES.includes(type)) {
+    throw new HttpsError("invalid-argument", `Unknown command type: ${type}`);
+  }
+  if (type === "block_ip" && !ip) {
+    throw new HttpsError("invalid-argument", "ip required for block_ip");
+  }
+  // Basic IP validation
+  if (ip && !/^(\d{1,3}\.){3}\d{1,3}$/.test(ip)) {
+    throw new HttpsError("invalid-argument", "Invalid IP address format");
+  }
+
+  const uid = request.auth.uid;
+  const did = sanitizeDeviceId(deviceId);
+
+  const cmdRef = db.collection("users").doc(uid)
+    .collection("devices").doc(did)
+    .collection("commands").doc();
+
+  await cmdRef.set({
+    type,
+    ip:        ip || null,
+    status:    "pending",
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    result:    null,
+  });
+
+  return { commandId: cmdRef.id };
+});
+
+// ── reportCommandResult ───────────────────────────────────────────────────────
+// HTTP POST (agent token auth): agent reports the result of executing a command.
+
+exports.reportCommandResult = onRequest(async (req, res) => {
+  res.set("Access-Control-Allow-Origin", "*");
+  if (req.method === "OPTIONS") { res.status(204).send(""); return; }
+  if (req.method !== "POST")    { res.status(405).json({ error: "POST required" }); return; }
+
+  const { token, deviceId, commandId, success, output } = req.body;
+
+  const uid = await resolveToken(token);
+  if (!uid) return res.status(401).json({ error: "Invalid or unknown AgentToken" });
+
+  if (!commandId) return res.status(400).json({ error: "commandId required" });
+
+  const did    = sanitizeDeviceId(deviceId);
+  const cmdRef = db.collection("users").doc(uid)
+    .collection("devices").doc(did)
+    .collection("commands").doc(commandId);
+
+  const snap = await cmdRef.get();
+  if (!snap.exists) return res.status(404).json({ error: "Command not found" });
+
+  await cmdRef.update({
+    status:      success ? "done" : "error",
+    result:      output  || null,
+    completedAt: admin.firestore.FieldValue.serverTimestamp(),
+  });
+
+  res.json({ ok: true });
+});

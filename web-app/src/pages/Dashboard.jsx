@@ -118,6 +118,9 @@ function DeviceCard({ device, rt, online, onView, onEditNickname, t, isRTL }) {
       <div style={s.cardHeader}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
           <span style={{ ...s.statusDot, background: online ? "#56d364" : "#6e7681" }} />
+          <span style={{ fontSize: 16, flexShrink: 0 }}>
+            {device.os === "Linux" ? "🐧" : "🪟"}
+          </span>
           <div style={{ minWidth: 0 }}>
             <p style={s.deviceName}>{displayName}</p>
             {device.nickname && device.name && (
@@ -220,6 +223,28 @@ function DeviceCard({ device, rt, online, onView, onEditNickname, t, isRTL }) {
             <span style={{ fontSize: 11, color: "#fc8181" }}>
               ⚠️ {device.network_dangerous_ports} {t("network.dangerousPorts")}
             </span>
+          )}
+        </div>
+      )}
+
+      {/* Linux-specific row */}
+      {device.os === "Linux" && (
+        <div style={{ ...s.cardSection, flexWrap: "wrap", gap: 4 }}>
+          {device.uptime_seconds != null && (() => {
+            const d = Math.floor(device.uptime_seconds / 86400);
+            const h = Math.floor((device.uptime_seconds % 86400) / 3600);
+            return <span style={{ fontSize: 12, color: "#8b949e" }}>⏱ {d > 0 ? `${d}d ${h}h` : `${h}h`}</span>;
+          })()}
+          {device.ssh_failed_logins > 0 && (
+            <span style={{ fontSize: 12, color: "#ed8936" }}>
+              ⚠️ {device.ssh_failed_logins} {t("linux.failedLogins")}
+            </span>
+          )}
+          {device.firewall_active === false && (
+            <span style={{ fontSize: 12, color: "#fc8181" }}>🔴 UFW off</span>
+          )}
+          {device.firewall_active === true && (
+            <span style={{ fontSize: 12, color: "#56d364" }}>🛡️ UFW on</span>
           )}
         </div>
       )}

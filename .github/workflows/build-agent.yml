@@ -1,4 +1,4 @@
-name: Build Windows Agent
+name: Build Agents
 
 on:
   push:
@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  build:
+  build-windows:
     runs-on: windows-latest
     permissions:
       contents: write
@@ -49,9 +49,10 @@ jobs:
             --hidden-import=modules.privacy `
             --hidden-import=modules.backup `
             --hidden-import=modules.cleaner `
+            --hidden-import=modules.network_info `
             setup_wizard.py
 
-      - name: Upload artifact
+      - name: Upload Windows artifact
         uses: actions/upload-artifact@v4
         with:
           name: PCGuard-Setup
@@ -62,7 +63,7 @@ jobs:
         shell: bash
         run: echo "VERSION=$(node -p "require('./web-app/package.json').version")" >> $GITHUB_OUTPUT
 
-      - name: Create GitHub Release
+      - name: Create GitHub Release (Windows)
         uses: ncipollo/release-action@v1
         with:
           tag: v${{ steps.version.outputs.VERSION }}
@@ -73,10 +74,52 @@ jobs:
           body: |
             ## PCGuard v${{ steps.version.outputs.VERSION }}
 
-            ### Installation
+            ### Windows Installation
             1. Download **PCGuard-Setup.exe**
             2. Double-click the file
             3. Paste your personal token from the [Setup page](https://pcguard-rami.web.app/setup)
             4. Click **Install** — done!
 
-            > Windows 10 / 11 · No technical knowledge needed
+            ### Linux / VPS Installation
+            Run on your server as root:
+            ```bash
+            curl -sSL https://pcguard-rami.web.app/install.sh | bash
+            ```
+
+            > Windows 10/11 · Ubuntu 18+ · Debian 10+ · No technical knowledge needed
+
+  build-linux:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Package Linux agent
+        run: |
+          mkdir -p dist-linux
+          cp agent-linux/linux_agent.py dist-linux/
+          cp agent-linux/requirements-linux.txt dist-linux/
+          tar -czf PCGuard-Linux.tar.gz -C dist-linux .
+
+      - name: Upload Linux artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: PCGuard-Linux
+          path: PCGuard-Linux.tar.gz
+
+      - name: Get version from package.json
+        id: version
+        run: echo "VERSION=$(node -p "require('./web-app/package.json').version")" >> $GITHUB_OUTPUT
+
+      - name: Add Linux package to GitHub Release
+        uses: ncipollo/release-action@v1
+        with:
+          tag: v${{ steps.version.outputs.VERSION }}
+          name: PCGuard v${{ steps.version.outputs.VERSION }}
+          allowUpdates: true
+          artifacts: PCGuard-Linux.tar.gz
+          token: ${{ secrets.GITHUB_TOKEN }}
+          omitBody: true

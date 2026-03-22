@@ -267,6 +267,30 @@ Firebase Console → Authentication → Sign-in method → Google → Enable
 
 ## Changelog
 
+### [1.2.0] — 2026-03-22
+**Step 11 complete: Linux/VPS agent — Ubuntu/Debian support with SSH brute-force detection**
+- **`agent-linux/linux_agent.py`**: full Python agent for Ubuntu/Debian servers — runs as systemd service, no GUI
+- **One-line install**: `curl -sSL https://pcguard-rami.web.app/install.sh | bash` — detects Python/pip, downloads from GitHub release, creates `/opt/pcguard/config.json`, enables systemd service
+- **Linux scanning**: CPU/RAM/disk, temperatures, uptime, OS info, SSH failed login parsing (`/var/log/auth.log`), open ports (`psutil`), sudo users, SUID file detection in `/tmp` / `/dev/shm`, world-writable `/etc` files, UFW firewall status
+- **Security scoring**: SSH brute force penalty, no-firewall penalty, dangerous ports penalty, SUID file penalty
+- **Remote commands**: `sendLinuxCommand` Cloud Function queues commands; agent polls via `realtimeHeartbeat` response; `reportCommandResult` HTTP endpoint confirms execution
+- **Block IP button**: web UI → `sendLinuxCommand({type:"block_ip", ip})` → agent runs `ufw deny from {ip}`
+- **Enable UFW button**: web UI → `sendLinuxCommand({type:"enable_ufw"})` → agent runs `ufw enable`
+- **Dashboard DeviceCard**: OS icon (🐧 Linux / 🪟 Windows), uptime badge, SSH failed login count, UFW on/off indicator
+- **Device detail — Linux Security tab**: Brute Force section (total attempts + unique IPs + per-IP block button + manual block input), Access Log (last 5 logins), Privilege Escalation (sudo users + SUID suspects), Firewall (UFW status + rules count + Enable button)
+- **Setup page**: added Linux install section with install command + copy button
+- **GitHub Actions**: added `build-linux` job that packages `linux_agent.py` + `requirements-linux.txt` as `PCGuard-Linux.tar.gz` in the same GitHub Release
+- **Firestore rules**: added `/commands/{commandId}` read-only rule for web client
+- **Bilingual**: all new strings in `en.json` + `he.json` (`linux.*` namespace)
+
+### [1.1.0] — 2026-03-22
+**Network information — device cards and detail view**
+- Added `agent/modules/network_info.py`: collects connectivity, latency, IPs, SSID, RDP, SSH, open ports (with danger detection)
+- Agent sends network snapshot in realtime heartbeat (refreshed every 30s)
+- Health score: RDP enabled = −5, dangerous port = −15 each (max −30)
+- Dashboard DeviceCard: Network row (connected/latency, local IP, RDP/SSH badges, danger ports)
+- DeviceDashboard Network tab: SVG latency bar chart, IPs, RDP+SSH cards with explanations, open ports table with risk badges
+
 ### [1.0.0] — 2026-03-21
 **Step 10 complete: Multi-device adaptive dashboard — Grid View (1-5) + Command Center (6+)**
 - **Multi-device Firestore architecture**: all data now under `/users/{uid}/devices/{deviceId}/` — scans, realtime, security, status
