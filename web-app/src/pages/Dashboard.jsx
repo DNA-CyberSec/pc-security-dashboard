@@ -185,6 +185,7 @@ function hasAlerts(device) {
 // ── Device Card (Grid Mode) ───────────────────────────────────────────────────
 
 function DeviceCard({ device, rt, online, onView, onEditNickname, latestVersion, onUpdateClick, t, isRTL }) {
+  const { isMobile, isTablet } = useResponsive();
   const [flash, setFlash] = useState(false);
 
   useEffect(() => {
