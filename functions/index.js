@@ -5,10 +5,11 @@
  *  generateAgentToken       — callable (auth required) — creates / returns user's AgentToken
  *  agentHeartbeat           — HTTP POST — agent sends liveness ping
  *  submitScan               — HTTP POST — agent submits full scan data
- *  realtimeHeartbeat        — HTTP POST — agent sends lightweight CPU/RAM every 10s
+ *  realtimeHeartbeat        — HTTP POST — agent sends lightweight CPU/RAM every 10s (rate-limited: 1/8s)
  *  getScanRecommendations   — callable (auth required) — Claude AI analysis
  *  explainIssue             — callable (auth required) — explain a single issue
  *  onScanCreated            — Firestore trigger — auto-generate AI recommendations
+ *  cleanupOldScans          — scheduled daily — delete scan docs older than 90 days
  *
  * Multi-device Firestore structure (per device):
  *  /users/{uid}/devices/{deviceId}               ← device status + summary
@@ -19,6 +20,7 @@
 
 const { onCall, onRequest, HttpsError } = require("firebase-functions/v2/https");
 const { onDocumentCreated } = require("firebase-functions/v2/firestore");
+const { onSchedule } = require("firebase-functions/v2/scheduler");
 const admin  = require("firebase-admin");
 const crypto = require("crypto");
 const { generateRecommendations, explainIssue: claudeExplain } = require("./claude");
@@ -32,12 +34,45 @@ function makeToken() {
   return "pcg-" + crypto.randomBytes(16).toString("hex");
 }
 
+// Tokens inactive for longer than this are considered expired.
+const TOKEN_TTL_MS = 90 * 24 * 60 * 60 * 1000; // 90 days
+
 async function resolveToken(token) {
   if (!token || typeof token !== "string") return null;
   const snap = await db.collection("agentTokens").doc(token).get();
   if (!snap.exists) return null;
+
+  // Token expiration: treat as invalid if unused for >90 days.
+  // Use lastUsedAt when set; fall back to createdAt for brand-new tokens.
+  const data        = snap.data();
+  const lastActivity = data.lastUsedAt ?? data.createdAt;
+  if (lastActivity) {
+    const ageMs = Date.now() - (lastActivity.toMillis?.() ?? 0);
+    if (ageMs > TOKEN_TTL_MS) {
+      console.warn(`Expired token rejected — uid=${data.uid} inactive ${Math.round(ageMs / 86400000)}d`);
+      return null;
+    }
+  }
+
   snap.ref.update({ lastUsedAt: admin.firestore.FieldValue.serverTimestamp() }).catch(() => {});
-  return snap.data().uid;
+  return data.uid;
+}
+
+// Firestore-backed per-token rate limiter.
+// Returns true (and updates the timestamp) when the call is allowed;
+// returns false when the caller is within the cooldown window.
+const REALTIME_RATE_LIMIT_MS = 8_000; // 8 seconds
+
+async function checkRateLimit(token) {
+  const ref  = db.collection("rateLimits").doc(token);
+  const snap = await ref.get();
+  if (snap.exists) {
+    const lastMs = snap.data().lastRealtimeCall?.toMillis?.() ?? 0;
+    if (Date.now() - lastMs < REALTIME_RATE_LIMIT_MS) return false;
+  }
+  // Update async — fire-and-forget so we don't add latency to the response
+  ref.set({ lastRealtimeCall: admin.firestore.FieldValue.serverTimestamp() }, { merge: true }).catch(() => {});
+  return true;
 }
 
 /** Sanitise a device ID coming from the agent — only allow safe chars, max 128. */
@@ -262,6 +297,10 @@ exports.realtimeHeartbeat = onRequest(async (req, res) => {
 
   const uid = await resolveToken(token);
   if (!uid) return res.status(401).json({ error: "Invalid or unknown AgentToken" });
+
+  // Rate limit: max 1 realtimeHeartbeat per 8 seconds per token
+  const allowed = await checkRateLimit(token);
+  if (!allowed) return res.status(429).json({ error: "Rate limit exceeded — max 1 realtimeHeartbeat per 8s" });
 
   const did       = sanitizeDeviceId(deviceId);
   const deviceRef = db.collection("users").doc(uid).collection("devices").doc(did);
@@ -633,4 +672,27 @@ exports.reportCommandResult = onRequest(async (req, res) => {
   });
 
   res.json({ ok: true });
+});
+
+// ── cleanupOldScans ───────────────────────────────────────────────────────────
+// Scheduled daily job: delete scan documents older than 90 days.
+// Uses a collection group query across all users/devices (up to 500 per run;
+// subsequent daily runs drain any remaining backlog).
+
+exports.cleanupOldScans = onSchedule("every 24 hours", async () => {
+  const cutoff = new Date(Date.now() - TOKEN_TTL_MS); // reuse the 90-day constant
+  const snap   = await db.collectionGroup("scans")
+    .where("createdAt", "<", cutoff)
+    .limit(500)
+    .get();
+
+  if (snap.empty) {
+    console.log("cleanupOldScans: no scans to delete.");
+    return;
+  }
+
+  const batch = db.batch();
+  snap.docs.forEach(doc => batch.delete(doc.ref));
+  await batch.commit();
+  console.log(`cleanupOldScans: deleted ${snap.docs.length} scans older than 90 days.`);
 });
