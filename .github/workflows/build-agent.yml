@@ -20,6 +20,13 @@ jobs:
         with:
           python-version: "3.11"
 
+      - name: Sync version into agent/VERSION
+        shell: bash
+        run: |
+          VERSION=$(node -p "require('./web-app/package.json').version")
+          echo -n "$VERSION" > agent/VERSION
+          echo "Synced agent/VERSION to $VERSION"
+
       - name: Install dependencies
         run: |
           cd agent
@@ -33,6 +40,7 @@ jobs:
             --windowed `
             --name "PCGuard-Setup" `
             --paths . `
+            --add-data "VERSION;." `
             --hidden-import=psutil `
             --hidden-import=requests `
             --hidden-import=schedule `
@@ -116,6 +124,12 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Sync version into agent-linux/VERSION
+        run: |
+          VERSION=$(node -p "require('./web-app/package.json').version")
+          echo -n "$VERSION" > agent-linux/VERSION
+          echo "Synced agent-linux/VERSION to $VERSION"
 
       - name: Package Linux agent
         run: |
