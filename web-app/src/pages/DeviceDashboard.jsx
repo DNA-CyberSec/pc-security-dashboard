@@ -112,6 +112,172 @@ function formatAgo(ts, t) {
   return date.toLocaleDateString();
 }
 
+// ── Mac Security Tab ──────────────────────────────────────────────────────────
+
+function MacSecurityTab({ scan }) {
+  if (!scan) {
+    return (
+      <div style={{ padding: "40px 0", textAlign: "center", color: "#4a5568" }}>
+        No scan data yet. The agent will send a full scan within 5 minutes.
+      </div>
+    );
+  }
+
+  const fv       = scan.filevault    || {};
+  const gk       = scan.gatekeeper   || {};
+  const sip      = scan.sip          || {};
+  const fw       = scan.macFirewall  || {};
+  const admins   = scan.adminUsers   || [];
+  const installs = scan.recentInstalls || [];
+  const sshFails = scan.sshFailedLogins || {};
+
+  const SecurityRow = ({ label, enabled, goodLabel, badLabel, desc }) => (
+    <div style={{
+      padding: "14px 16px", borderRadius: 8, marginBottom: 10,
+      background: enabled ? "#0a1f13" : "#1e1010",
+      border: `1px solid ${enabled ? "#238636" : "#742a2a"}`,
+    }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <span style={{ fontWeight: 700, fontSize: 14, color: enabled ? "#56d364" : "#fc8181" }}>
+          {enabled ? "🔒" : "⚠️"} {label}
+        </span>
+        <span style={{
+          fontSize: 12, fontWeight: 700, padding: "2px 10px", borderRadius: 10,
+          background: enabled ? "#0d2818" : "#2d1b1b",
+          color: enabled ? "#56d364" : "#fc8181",
+          border: `1px solid ${enabled ? "#238636" : "#742a2a"}`,
+        }}>
+          {enabled ? (goodLabel || "ON") : (badLabel || "OFF")}
+        </span>
+      </div>
+      {desc && (
+        <p style={{ fontSize: 12, color: "#8b949e", margin: "6px 0 0", lineHeight: 1.5 }}>{desc}</p>
+      )}
+    </div>
+  );
+
+  return (
+    <div className="rg-linux">
+
+      {/* macOS Security Features */}
+      <div style={s.infoCard}>
+        <p style={s.cardTitle}>macOS Security</p>
+
+        <SecurityRow
+          label="FileVault"
+          enabled={fv.enabled}
+          goodLabel="ENCRYPTED"
+          badLabel="UNENCRYPTED"
+          desc={fv.enabled
+            ? "Disk encryption is active. Your data is protected if the Mac is lost or stolen."
+            : "FileVault is OFF. Enable it in System Settings → Privacy & Security → FileVault."}
+        />
+        <SecurityRow
+          label="Gatekeeper"
+          enabled={gk.enabled}
+          goodLabel="ENABLED"
+          badLabel="DISABLED"
+          desc={gk.enabled
+            ? "Only signed and notarised apps can run. Protects against malicious software."
+            : "Gatekeeper is disabled — unsigned apps can run freely. Re-enable via: sudo spctl --master-enable"}
+        />
+        <SecurityRow
+          label="System Integrity Protection (SIP)"
+          enabled={sip.enabled}
+          goodLabel="ENABLED"
+          badLabel="DISABLED"
+          desc={sip.enabled
+            ? "SIP protects critical system files from modification, even by root."
+            : "SIP is disabled. System files can be modified. Re-enable from macOS Recovery."}
+        />
+        <SecurityRow
+          label="Application Firewall"
+          enabled={fw.enabled}
+          goodLabel="ENABLED"
+          badLabel="DISABLED"
+          desc={fw.enabled
+            ? "Firewall is active — incoming connections to unsigned apps are blocked."
+            : "Firewall is off. Enable in System Settings → Network → Firewall."}
+        />
+      </div>
+
+      {/* Admin Users + SSH Attempts */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+
+        {/* Admin users */}
+        <div style={s.infoCard}>
+          <p style={s.cardTitle}>Admin Users</p>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
+            {admins.length === 0 ? (
+              <span style={s.muted}>—</span>
+            ) : admins.map((u, i) => (
+              <span key={i} style={{ fontSize: 11, background: "#0d2818", border: "1px solid #238636",
+                                     color: "#56d364", borderRadius: 4, padding: "2px 8px" }}>
+                {u}
+              </span>
+            ))}
+          </div>
+          {admins.length > 2 && (
+            <p style={{ fontSize: 12, color: "#f6ad55", marginTop: 8 }}>
+              ⚠️ {admins.length} admin accounts — consider reducing to one.
+            </p>
+          )}
+        </div>
+
+        {/* SSH failed logins */}
+        <div style={s.infoCard}>
+          <p style={s.cardTitle}>SSH Brute Force (24h)</p>
+          <div style={{ display: "flex", gap: 24, marginBottom: 8 }}>
+            <div>
+              <p style={{ ...s.bigVal, color: sshFails.total > 50 ? "#fc8181" : sshFails.total > 10 ? "#f6ad55" : "#e2e8f0" }}>
+                {sshFails.total ?? 0}
+              </p>
+              <p style={s.muted}>Failed logins</p>
+            </div>
+            <div>
+              <p style={{ ...s.bigVal, color: "#f6ad55" }}>{sshFails.unique_ips ?? 0}</p>
+              <p style={s.muted}>Unique IPs</p>
+            </div>
+          </div>
+          {(sshFails.top_ips || []).slice(0, 5).map((item, i) => (
+            <div key={i} style={{ display: "flex", justifyContent: "space-between",
+                                  padding: "4px 0", borderBottom: "1px solid #21262d" }}>
+              <span style={{ fontFamily: "monospace", fontSize: 12, color: "#fc8181" }}>{item.ip}</span>
+              <span style={{ fontSize: 11, color: "#8b949e" }}>×{item.count}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Recent Installs — full width */}
+      <div style={{ ...s.infoCard, gridColumn: "1 / -1" }}>
+        <p style={s.cardTitle}>Recent Installs (last 7 days) · {installs.length} items</p>
+        {installs.length === 0 ? (
+          <p style={s.muted}>No software installed in the last 7 days.</p>
+        ) : (
+          <table style={s.procTable}>
+            <thead>
+              <tr>
+                <th style={s.th}>Application</th>
+                <th style={{ ...s.th, textAlign: "right" }}>Date</th>
+              </tr>
+            </thead>
+            <tbody>
+              {installs.map((item, i) => (
+                <tr key={i}>
+                  <td style={{ ...s.td, color: "#c9d1d9" }}>{item.name}</td>
+                  <td style={{ ...s.td, textAlign: "right", color: "#8b949e", fontSize: 11 }}>{item.date}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+    </div>
+  );
+}
+
 // ── Linux Security Tab ────────────────────────────────────────────────────────
 
 function LinuxSecurityTab({ scan, deviceId, commands, cmdLoading, sendCommand, t }) {
@@ -770,7 +936,7 @@ export default function DeviceDashboard({ user }) {
           {[
             { id: "overview",  label: `📊 ${t("report.tabs.overview")}` },
             { id: "network",   label: `🌐 ${t("network.title")}` },
-            ...(deviceDoc?.os === "Linux" ? [{ id: "security", label: `🛡️ ${t("dashboard.sections.security")}` }] : []),
+            ...((deviceDoc?.os === "Linux" || deviceDoc?.os === "macOS") ? [{ id: "security", label: `🛡️ ${t("dashboard.sections.security")}` }] : []),
           ].map(tab => (
             <button
               key={tab.id}
@@ -803,7 +969,7 @@ export default function DeviceDashboard({ user }) {
 
         {/* ── ROW 2: Info cards (Overview tab) ──────────────────────────── */}
         {activeTab === "network"  ? <NetworkTab networkData={networkData} t={t} /> : null}
-        {activeTab === "security" ? (
+        {activeTab === "security" && deviceDoc?.os === "Linux" ? (
           <LinuxSecurityTab
             scan={latestScan}
             deviceId={deviceId}
@@ -812,6 +978,8 @@ export default function DeviceDashboard({ user }) {
             sendCommand={sendCommand}
             t={t}
           />
+        ) : activeTab === "security" && deviceDoc?.os === "macOS" ? (
+          <MacSecurityTab scan={latestScan} />
         ) : null}
         <div className="rg-cards" style={{ display: activeTab === "overview" ? "grid" : "none" }}>
 
@@ -1002,6 +1170,8 @@ export default function DeviceDashboard({ user }) {
                 {(() => {
                   const expected = deviceDoc?.os === "Linux"
                     ? latestVersion?.linux_version
+                    : deviceDoc?.os === "macOS"
+                    ? latestVersion?.mac_version
                     : latestVersion?.windows_version;
                   const isUpToDate = !expected || deviceDoc.agentVersion === expected;
                   return isUpToDate ? (
@@ -1017,6 +1187,13 @@ export default function DeviceDashboard({ user }) {
                             {t("version.linuxUpdateCmd")}<br />
                             <code style={{ fontFamily: "monospace", color: "#58a6ff", fontSize: 11 }}>
                               curl -sSL https://pcguard-rami.web.app/install.sh | bash
+                            </code>
+                          </p>
+                        ) : deviceDoc?.os === "macOS" ? (
+                          <p style={{ fontSize: 11, color: "#8b949e", lineHeight: 1.6 }}>
+                            Run in Terminal to update:<br />
+                            <code style={{ fontFamily: "monospace", color: "#58a6ff", fontSize: 11 }}>
+                              curl -sSL https://pcguard-rami.web.app/install-mac.sh | bash
                             </code>
                           </p>
                         ) : (

@@ -267,6 +267,21 @@ Firebase Console → Authentication → Sign-in method → Google → Enable
 
 ## Changelog
 
+### [1.0.0] — 2026-03-22
+**Step 13 complete: macOS agent — FileVault, Gatekeeper, SIP monitoring**
+- **`agent-mac/mac_agent.py`**: pure Python agent for macOS 12+ — no sudo required, runs as a launchd LaunchAgent per user
+- **Device ID**: permanent hardware UUID via `ioreg -rd1 -c IOPlatformExpertDevice` (survives reinstalls)
+- **One-line install**: `curl -sSL https://pcguard-rami.web.app/install-mac.sh | bash` — installs to `~/Library/Application Support/PCGuard/`, creates launchd plist at `~/Library/LaunchAgents/com.pcguard.agent.plist`, loads immediately, auto-starts on login
+- **macOS scanning**: CPU/RAM/disk (psutil), uptime, OS version, Mac model (`system_profiler`), chip type (Apple Silicon / Intel), open ports
+- **Security checks**: FileVault (`fdesetup status`), Gatekeeper (`spctl --status`), SIP (`csrutil status`), Application Firewall (`socketfilterfw --getglobalstate`), admin users (`dscl . -read /Groups/admin`), recent installs last 7 days (`system_profiler SPInstallHistoryDataType`), SSH failed logins last 24h (unified log)
+- **Health score penalties**: FileVault OFF −20, Gatekeeper OFF −15, SIP OFF −15, Firewall OFF −10, SSH enabled −5, Remote Management ON −10
+- **Dashboard DeviceCard**: 🍎 Mac icon, Mac model badge, chip type pill, FileVault 🔒/⚠️ indicator
+- **Device detail — Security tab**: SecurityRow cards for FileVault/Gatekeeper/SIP/Firewall with explanations, admin users list, SSH brute-force count, recent installs table
+- **Setup page**: added "Add a Mac" section with one-line install command + copy button
+- **GitHub Actions**: added `build-mac` job that packages agent as `PCGuard-Mac.tar.gz` in GitHub Release; all three build jobs send `mac_version` to Firestore
+- **Firestore `latestAgentVersion`**: added `mac_version` field
+- **Version badge**: macOS devices check against `mac_version` from Firestore; update modal shows `install-mac.sh` command
+
 ### [1.2.0] — 2026-03-22
 **Step 11 complete: Linux/VPS agent — Ubuntu/Debian support with SSH brute-force detection**
 - **`agent-linux/linux_agent.py`**: full Python agent for Ubuntu/Debian servers — runs as systemd service, no GUI

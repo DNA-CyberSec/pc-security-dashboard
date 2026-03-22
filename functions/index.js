@@ -696,7 +696,7 @@ exports.setLatestAgentVersion = onRequest(
     // No CORS wildcard needed here.
     if (req.method !== "POST") { res.status(405).json({ error: "POST required" }); return; }
 
-    const { secret, windows_version, linux_version, changelog } = req.body;
+    const { secret, windows_version, linux_version, mac_version, changelog } = req.body;
 
     // Timing-safe comparison to prevent secret enumeration via response time
     if (!timingSafeEqual(secret, process.env.DEPLOY_SECRET)) {
@@ -706,12 +706,13 @@ exports.setLatestAgentVersion = onRequest(
     await db.collection("config").doc("latestAgentVersion").set({
       windows_version: windows_version || null,
       linux_version:   linux_version   || null,
+      mac_version:     mac_version     || null,
       changelog:       changelog        || "",
       released_at:     admin.firestore.FieldValue.serverTimestamp(),
       updatedAt:       admin.firestore.FieldValue.serverTimestamp(),
     });
 
-    console.log(`Agent version updated — windows=${windows_version} linux=${linux_version}`);
+    console.log(`Agent version updated — windows=${windows_version} linux=${linux_version} mac=${mac_version}`);
     res.json({ ok: true });
   }
 );

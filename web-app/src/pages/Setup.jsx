@@ -6,7 +6,8 @@ import { functions } from "../firebase";
 
 const AGENT_DOWNLOAD_URL =
   "https://github.com/DNA-CyberSec/pc-security-dashboard/releases/latest/download/PCGuard-Setup.exe";
-const LINUX_INSTALL_CMD  = "curl -sSL https://pcguard-rami.web.app/install.sh | bash";
+const LINUX_INSTALL_CMD = "curl -sSL https://pcguard-rami.web.app/install.sh | bash";
+const MAC_INSTALL_CMD   = "curl -sSL https://pcguard-rami.web.app/install-mac.sh | bash";
 
 export default function Setup({ user }) {
   const { t, i18n } = useTranslation();
@@ -16,6 +17,7 @@ export default function Setup({ user }) {
   const [token,         setToken]         = useState("");
   const [copied,        setCopied]        = useState(false);
   const [copiedLinux,   setCopiedLinux]   = useState(false);
+  const [copiedMac,     setCopiedMac]     = useState(false);
   const [loading,       setLoading]       = useState(true);
   const [error,         setError]         = useState(null);
 
@@ -180,6 +182,48 @@ export default function Setup({ user }) {
 
             <p style={{ fontSize: 11, color: "#4a5568", marginTop: 12 }}>
               Ubuntu 18+ · Debian 10+ · Requires root (sudo)
+            </p>
+          </div>
+
+          {/* ── macOS separator ──────────────────────────────────────── */}
+          <div style={s.divider}>
+            <span style={s.dividerText}>— Mac —</span>
+          </div>
+
+          {/* macOS install card */}
+          <div style={{ ...s.downloadCard, borderColor: "#30363d", background: "#161b22" }}>
+            <div style={{ fontSize: 48, marginBottom: 8 }}>🍎</div>
+            <h2 style={{ fontSize: 20, fontWeight: 700, color: "#e2e8f0", margin: "0 0 8px" }}>
+              Add a Mac
+            </h2>
+            <p style={{ fontSize: 14, color: "#8b949e", margin: "0 0 20px", maxWidth: 480 }}>
+              Monitors FileVault, Gatekeeper, SIP, firewall, and more.
+              No sudo required — installs per-user via launchd.
+            </p>
+
+            {/* Steps */}
+            <div style={{ ...s.miniSteps, width: "100%", maxWidth: 520, marginBottom: 20 }}>
+              <div style={s.miniStep}>1. Copy your Agent Token above</div>
+              <div style={s.miniStep}>2. Open Terminal and run the command below</div>
+            </div>
+
+            {/* Install command */}
+            <div style={s.cmdBlock}>
+              <code style={s.cmdCode}>{MAC_INSTALL_CMD}</code>
+              <button
+                onClick={() => copyText(MAC_INSTALL_CMD, setCopiedMac)}
+                style={{ ...s.copyBtn, ...(copiedMac ? s.copyBtnDone : {}), flexShrink: 0 }}
+              >
+                {copiedMac ? "✓ " + t("setup.copied") : "📋 " + t("setup.copy")}
+              </button>
+            </div>
+
+            <div style={{ ...s.miniSteps, width: "100%", maxWidth: 520, marginTop: 8 }}>
+              <div style={s.miniStep}>3. Paste your token when prompted — done!</div>
+            </div>
+
+            <p style={{ fontSize: 11, color: "#4a5568", marginTop: 12 }}>
+              macOS 12+ (Monterey and later) · No sudo required
             </p>
           </div>
 

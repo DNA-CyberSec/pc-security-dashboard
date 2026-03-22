@@ -106,7 +106,7 @@ jobs:
           RESPONSE=$(curl -sS -w "\n%{http_code}" -X POST \
             "https://us-central1-pc-security-dashboard.cloudfunctions.net/setLatestAgentVersion" \
             -H "Content-Type: application/json" \
-            -d "{\"secret\":\"${DEPLOY_SECRET}\",\"windows_version\":\"${VERSION}\",\"linux_version\":\"${VERSION}\",\"changelog\":\"PCGuard v${VERSION}\"}")
+            -d "{\"secret\":\"${DEPLOY_SECRET}\",\"windows_version\":\"${VERSION}\",\"linux_version\":\"${VERSION}\",\"mac_version\":\"${VERSION}\",\"changelog\":\"PCGuard v${VERSION}\"}")
           HTTP_CODE=$(echo "${RESPONSE}" | tail -1)
           BODY=$(echo "${RESPONSE}" | head -1)
           echo "Response body: ${BODY}"
@@ -168,7 +168,69 @@ jobs:
           RESPONSE=$(curl -sS -w "\n%{http_code}" -X POST \
             "https://us-central1-pc-security-dashboard.cloudfunctions.net/setLatestAgentVersion" \
             -H "Content-Type: application/json" \
-            -d "{\"secret\":\"${DEPLOY_SECRET}\",\"windows_version\":\"${VERSION}\",\"linux_version\":\"${VERSION}\",\"changelog\":\"PCGuard v${VERSION}\"}")
+            -d "{\"secret\":\"${DEPLOY_SECRET}\",\"windows_version\":\"${VERSION}\",\"linux_version\":\"${VERSION}\",\"mac_version\":\"${VERSION}\",\"changelog\":\"PCGuard v${VERSION}\"}")
+          HTTP_CODE=$(echo "${RESPONSE}" | tail -1)
+          BODY=$(echo "${RESPONSE}" | head -1)
+          echo "Response body: ${BODY}"
+          echo "HTTP status:   ${HTTP_CODE}"
+          if [ "${HTTP_CODE}" != "200" ]; then
+            echo "::error::setLatestAgentVersion returned HTTP ${HTTP_CODE}"
+            exit 1
+          fi
+
+  build-mac:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Sync version into agent-mac/VERSION
+        run: |
+          VERSION=$(node -p "require('./web-app/package.json').version")
+          echo -n "$VERSION" > agent-mac/VERSION
+          echo "Synced agent-mac/VERSION to $VERSION"
+
+      - name: Package macOS agent
+        run: |
+          mkdir -p dist-mac
+          cp agent-mac/mac_agent.py    dist-mac/
+          cp agent-mac/requirements.txt dist-mac/
+          cp agent-mac/VERSION          dist-mac/
+          tar -czf PCGuard-Mac.tar.gz -C dist-mac .
+
+      - name: Upload macOS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: PCGuard-Mac
+          path: PCGuard-Mac.tar.gz
+
+      - name: Get version from package.json
+        id: version
+        run: echo "VERSION=$(node -p "require('./web-app/package.json').version")" >> $GITHUB_OUTPUT
+
+      - name: Add macOS package to GitHub Release
+        uses: ncipollo/release-action@v1
+        with:
+          tag: v${{ steps.version.outputs.VERSION }}
+          name: PCGuard v${{ steps.version.outputs.VERSION }}
+          allowUpdates: true
+          artifacts: PCGuard-Mac.tar.gz
+          token: ${{ secrets.GITHUB_TOKEN }}
+          omitBody: true
+
+      - name: Update latestAgentVersion in Firestore
+        env:
+          DEPLOY_SECRET: ${{ secrets.DEPLOY_SECRET }}
+        run: |
+          VERSION="${{ steps.version.outputs.VERSION }}"
+          echo "Updating Firestore version to ${VERSION}..."
+          RESPONSE=$(curl -sS -w "\n%{http_code}" -X POST \
+            "https://us-central1-pc-security-dashboard.cloudfunctions.net/setLatestAgentVersion" \
+            -H "Content-Type: application/json" \
+            -d "{\"secret\":\"${DEPLOY_SECRET}\",\"windows_version\":\"${VERSION}\",\"linux_version\":\"${VERSION}\",\"mac_version\":\"${VERSION}\",\"changelog\":\"PCGuard v${VERSION}\"}")
           HTTP_CODE=$(echo "${RESPONSE}" | tail -1)
           BODY=$(echo "${RESPONSE}" | head -1)
           echo "Response body: ${BODY}"

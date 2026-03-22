@@ -11,15 +11,19 @@ import { useResponsive } from "../hooks/useResponsive";
 
 function UpdateModal({ device, latestVersion, onClose, t }) {
   const isLinux  = device.os === "Linux";
+  const isMac    = device.os === "macOS";
   const current  = device.agentVersion || "?";
-  const latest   = isLinux ? latestVersion.linux_version : latestVersion.windows_version;
+  const latest   = isLinux ? latestVersion.linux_version
+    : isMac ? latestVersion.mac_version
+    : latestVersion.windows_version;
   const changelog = latestVersion.changelog || "";
   const dlUrl    = `https://github.com/DNA-CyberSec/pc-security-dashboard/releases/latest/download/PCGuard-Setup.exe`;
   const linuxCmd = "curl -sSL https://pcguard-rami.web.app/install.sh | bash";
+  const macCmd   = "curl -sSL https://pcguard-rami.web.app/install-mac.sh | bash";
   const [copied, setCopied] = useState(false);
 
-  const copyCmd = () => {
-    navigator.clipboard.writeText(linuxCmd).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000); });
+  const copyCmd = (cmd) => {
+    navigator.clipboard.writeText(cmd).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000); });
   };
 
   return (
@@ -54,7 +58,17 @@ function UpdateModal({ device, latestVersion, onClose, t }) {
               <p style={{ fontSize: 12, color: "#8b949e", marginBottom: 6 }}>{t("version.linuxUpdateCmd")}</p>
               <div style={{ display: "flex", gap: 8 }}>
                 <code style={ms.cmd}>{linuxCmd}</code>
-                <button onClick={copyCmd} style={ms.copyBtn}>
+                <button onClick={() => copyCmd(linuxCmd)} style={ms.copyBtn}>
+                  {copied ? "✓" : t("setup.copy")}
+                </button>
+              </div>
+            </>
+          ) : isMac ? (
+            <>
+              <p style={{ fontSize: 12, color: "#8b949e", marginBottom: 6 }}>Run in Terminal to update:</p>
+              <div style={{ display: "flex", gap: 8 }}>
+                <code style={ms.cmd}>{macCmd}</code>
+                <button onClick={() => copyCmd(macCmd)} style={ms.copyBtn}>
                   {copied ? "✓" : t("setup.copy")}
                 </button>
               </div>
@@ -217,7 +231,7 @@ function DeviceCard({ device, rt, online, onView, onEditNickname, latestVersion,
         <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
           <span style={{ ...s.statusDot, background: online ? "#56d364" : "#6e7681" }} />
           <span style={{ fontSize: 16, flexShrink: 0 }}>
-            {device.os === "Linux" ? "🐧" : "🪟"}
+            {device.os === "Linux" ? "🐧" : device.os === "macOS" ? "🍎" : "🪟"}
           </span>
           <div style={{ minWidth: 0 }}>
             <p style={s.deviceName}>{displayName}</p>
@@ -347,6 +361,33 @@ function DeviceCard({ device, rt, online, onView, onEditNickname, latestVersion,
         </div>
       )}
 
+      {/* macOS-specific row */}
+      {device.os === "macOS" && (
+        <div style={{ ...s.cardSection, flexWrap: "wrap", gap: 4 }}>
+          {device.mac_model && (
+            <span style={{ fontSize: 12, color: "#8b949e" }}>{device.mac_model}</span>
+          )}
+          {device.chip_type && (
+            <span style={{ fontSize: 11, background: "#161b22", border: "1px solid #30363d",
+                           color: "#8b949e", borderRadius: 4, padding: "1px 5px" }}>
+              {device.chip_type}
+            </span>
+          )}
+          {device.filevault_enabled === true && (
+            <span style={{ fontSize: 11, background: "#0d2818", border: "1px solid #238636",
+                           color: "#56d364", borderRadius: 4, padding: "1px 5px" }}>
+              🔒 FileVault
+            </span>
+          )}
+          {device.filevault_enabled === false && (
+            <span style={{ fontSize: 11, background: "#2d1b1b", border: "1px solid #742a2a",
+                           color: "#fc8181", borderRadius: 4, padding: "1px 5px" }}>
+              ⚠️ FileVault off
+            </span>
+          )}
+        </div>
+      )}
+
       {/* Logged-in user row */}
       {device.current_username && (
         <div style={{ ...s.cardSection, flexWrap: "wrap", gap: 4 }}>
@@ -371,7 +412,9 @@ function DeviceCard({ device, rt, online, onView, onEditNickname, latestVersion,
 
       {/* Version badge */}
       {device.agentVersion && latestVersion && (() => {
-        const expected = device.os === "Linux" ? latestVersion.linux_version : latestVersion.windows_version;
+        const expected = device.os === "Linux" ? latestVersion.linux_version
+          : device.os === "macOS" ? latestVersion.mac_version
+          : latestVersion.windows_version;
         const isUpToDate = !expected || device.agentVersion === expected;
         return (
           <div style={{ ...s.cardSection }}>
