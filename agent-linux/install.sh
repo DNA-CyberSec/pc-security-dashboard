@@ -47,8 +47,12 @@ if command -v apt-get &>/dev/null; then
 fi
 
 install_pkg python3 python3
-install_pkg pip3 python3-pip
 install_pkg curl curl
+
+# python3-venv + python3-full needed on Debian 12+ (PEP 668 externally-managed-environment)
+if command -v apt-get &>/dev/null; then
+  apt-get install -y -q python3-venv python3-full 2>/dev/null || true
+fi
 
 echo -e "  ${GREEN}✓ Dependencies ready${NC}"
 
@@ -67,10 +71,11 @@ else
   exit 1
 fi
 
-# ── Install Python packages ───────────────────────────────────────────────────
-echo -e "${YELLOW}[3/5] Installing Python packages...${NC}"
-pip3 install -q -r "$INSTALL_DIR/requirements-linux.txt"
-echo -e "  ${GREEN}✓ Python packages installed${NC}"
+# ── Create virtual environment + install packages ─────────────────────────────
+echo -e "${YELLOW}[3/5] Setting up Python virtual environment...${NC}"
+python3 -m venv "$INSTALL_DIR/venv"
+"$INSTALL_DIR/venv/bin/pip" install -q -r "$INSTALL_DIR/requirements-linux.txt"
+echo -e "  ${GREEN}✓ Python virtual environment ready${NC}"
 
 # ── Get Agent Token ───────────────────────────────────────────────────────────
 echo -e "${YELLOW}[4/5] Configuration${NC}"
@@ -109,7 +114,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/python3 /opt/pcguard/linux_agent.py
+ExecStart=/opt/pcguard/venv/bin/python3 /opt/pcguard/linux_agent.py
 Restart=always
 RestartSec=10
 StandardOutput=append:/opt/pcguard/agent.log
