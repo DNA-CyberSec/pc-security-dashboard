@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { signOut } from "firebase/auth";
 import { collection, doc, onSnapshot, setDoc } from "firebase/firestore";
 import { auth, db } from "../firebase";
+import { useResponsive } from "../hooks/useResponsive";
 
 // ── Update Modal ───────────────────────────────────────────────────────────────
 
@@ -249,7 +250,7 @@ function DeviceCard({ device, rt, online, onView, onEditNickname, latestVersion,
           { label: t("dashboard.healthScore"), value: device.healthScore, color: healthColor(device.healthScore) },
         ].map(({ label, value, color }) => (
           <div key={label} style={s.miniGaugeWrap}>
-            <MiniGauge value={value != null ? Math.round(value) : null} size={52} color={color} />
+            <MiniGauge value={value != null ? Math.round(value) : null} size={isMobile ? 60 : isTablet ? 64 : 72} color={color} />
             <span style={s.miniGaugeLabel}>{label}</span>
           </div>
         ))}
@@ -405,6 +406,7 @@ export default function Dashboard({ user }) {
   const { t, i18n } = useTranslation();
   const navigate    = useNavigate();
   const isRTL       = i18n.language === "he";
+  const { isMobile, isTablet } = useResponsive();
 
   const [devices,        setDevices]        = useState([]);
   const [realtimeMap,    setRealtimeMap]     = useState({});     // deviceId → rt data
@@ -558,25 +560,33 @@ export default function Dashboard({ user }) {
     <div dir={isRTL ? "rtl" : "ltr"} style={s.page}>
 
       {/* ── Header ──────────────────────────────────────────────────────── */}
-      <header style={s.header}>
+      <header style={{
+        ...s.header,
+        paddingTop: "max(14px, env(safe-area-inset-top))",
+        paddingLeft: isMobile ? "max(16px, env(safe-area-inset-left))" : "max(28px, env(safe-area-inset-left))",
+        paddingRight: isMobile ? "max(16px, env(safe-area-inset-right))" : "max(28px, env(safe-area-inset-right))",
+      }}>
         <div style={s.headerLeft}>
           <span style={{ fontSize: 22 }}>🛡️</span>
-          <span style={s.headerTitle}>{t("app.title")}</span>
+          <span style={s.headerTitle}>
+            <span className="hdr-full">{t("app.title")}</span>
+            <span className="hdr-short">PC Guard</span>
+          </span>
         </div>
         <div style={s.headerRight}>
           <button onClick={toggleLang} style={s.ghostBtn}>
-            {i18n.language === "en" ? "עברית" : "English"}
+            🌐 <span className="btn-lbl">{i18n.language === "en" ? "עברית" : "English"}</span>
           </button>
           <button onClick={() => navigate("/setup")} style={s.ghostBtn}>
-            + {t("devices.addDevice")}
+            + <span className="btn-lbl">{t("devices.addDevice")}</span>
           </button>
           <button onClick={() => signOut(auth).then(() => navigate("/login"))} style={s.ghostBtn}>
-            {t("nav.logout")}
+            ⏻ <span className="btn-lbl">{t("nav.logout")}</span>
           </button>
         </div>
       </header>
 
-      <main style={s.main}>
+      <main style={{ ...s.main, padding: isMobile ? "16px 14px" : "28px 24px", paddingBottom: "max(32px, env(safe-area-inset-bottom))" }}>
 
         {/* ── Welcome + title ─────────────────────────────────────────── */}
         <div style={s.pageHeader}>
@@ -614,7 +624,7 @@ export default function Dashboard({ user }) {
         {devices.length > 0 && (
           <>
             {/* ── Summary tiles ─────────────────────────────────────────── */}
-            <div style={s.summaryRow}>
+            <div className="rg-summary">
               {[
                 { label: t("devices.totalDevices"), value: totalDevices,       icon: "🖥️",  color: "#58a6ff" },
                 { label: t("devices.onlineDevices"), value: `${onlineCount} / ${totalDevices}`, icon: "🟢", color: "#56d364" },
@@ -657,7 +667,7 @@ export default function Dashboard({ user }) {
 
             {/* ── GRID VIEW ─────────────────────────────────────────────── */}
             {effectiveMode === "grid" && (
-              <div style={s.gridContainer}>
+              <div className="rg-devices">
                 {filtered.map(device => {
                   const online = isDeviceOnline(device);
                   const rt     = realtimeMap[device.id];

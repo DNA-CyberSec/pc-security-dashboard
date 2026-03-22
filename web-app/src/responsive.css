@@ -1,0 +1,89 @@
+/* ───────────────────────────────────────────────────────────────────
+   PCGuard — Responsive layout utilities
+   Breakpoints:  mobile < 640px  |  tablet 640–1023px  |  desktop 1024px+
+   ─────────────────────────────────────────────────────────────────── */
+
+/* Global */
+*, *::before, *::after { min-width: 0; }
+html, body { overflow-x: hidden; }
+html { font-size: 16px; }
+
+/* ── Summary tiles (Dashboard) ─────────────────────────────────────── */
+.rg-summary {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 14px;
+  margin-bottom: 20px;
+}
+
+/* ── Device card grid (Dashboard) ─────────────────────────────────── */
+.rg-devices {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(300px, 100%), 1fr));
+  gap: 16px;
+}
+
+/* ── Circular-gauge row (DeviceDashboard) ─────────────────────────── */
+.rg-gauges {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+/* ── Info-card row (DeviceDashboard) ──────────────────────────────── */
+.rg-cards {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+}
+
+/* ── Network tab grid ──────────────────────────────────────────────── */
+.rg-network {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+/* ── Linux security tab grid ───────────────────────────────────────── */
+.rg-linux {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+/* ── Tab bar: hide scrollbar, allow horizontal scroll ─────────────── */
+.tab-scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+.tab-scroll::-webkit-scrollbar { display: none; }
+
+/* ── Header title variants ─────────────────────────────────────────── */
+.hdr-short { display: none; }
+
+/* ── Tablet (640–1023px) ───────────────────────────────────────────── */
+@media (max-width: 1023px) {
+  .rg-cards   { grid-template-columns: repeat(2, 1fr); }
+  .rg-network { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ── Mobile (< 640px) ─────────────────────────────────────────────── */
+@media (max-width: 639px) {
+  html { font-size: 14px; }
+
+  .rg-summary { grid-template-columns: repeat(2, 1fr); gap: 10px; }
+  .rg-devices { grid-template-columns: 1fr; }
+  .rg-gauges  { grid-template-columns: repeat(2, 1fr); gap: 10px; }
+  .rg-cards   { grid-template-columns: 1fr; gap: 12px; }
+  .rg-network { grid-template-columns: 1fr; }
+  .rg-linux   { grid-template-columns: 1fr; }
+
+  .hdr-full  { display: none; }
+  .hdr-short { display: inline; }
+
+  .btn-lbl { display: none; }
+}

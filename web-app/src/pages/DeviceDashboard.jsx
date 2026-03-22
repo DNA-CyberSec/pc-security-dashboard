@@ -5,6 +5,7 @@ import { signOut } from "firebase/auth";
 import { collection, doc, getDoc, onSnapshot, setDoc } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
 import { auth, db, functions } from "../firebase";
+import { useResponsive } from "../hooks/useResponsive";
 
 // ── Circular SVG Gauge ────────────────────────────────────────────────────────
 
@@ -150,7 +151,7 @@ function LinuxSecurityTab({ scan, deviceId, commands, cmdLoading, sendCommand, t
   };
 
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 16, marginBottom: 24 }}>
+    <div className="rg-linux">
 
       {/* Brute Force */}
       <div style={s.infoCard}>
@@ -347,7 +348,7 @@ function NetworkTab({ networkData, t }) {
   const openPorts = net.open_ports || [];
 
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16, marginBottom: 24 }}>
+    <div className="rg-network">
 
       {/* Connection status + latency history */}
       <div style={s.infoCard}>
@@ -489,6 +490,7 @@ export default function DeviceDashboard({ user }) {
   const navigate       = useNavigate();
   const { deviceId }   = useParams();
   const isRTL          = i18n.language === "he";
+  const { isMobile, isTablet } = useResponsive();
 
   const [deviceDoc,     setDeviceDoc]     = useState(null);
   const [realtimeData,  setRealtimeData]  = useState(null);
@@ -668,35 +670,43 @@ export default function DeviceDashboard({ user }) {
     <div dir={isRTL ? "rtl" : "ltr"} style={s.page}>
 
       {/* ── Header ────────────────────────────────────────────────────────── */}
-      <header style={s.header}>
+      <header style={{
+        ...s.header,
+        paddingTop: "max(14px, env(safe-area-inset-top))",
+        paddingLeft: isMobile ? "max(16px, env(safe-area-inset-left))" : "max(28px, env(safe-area-inset-left))",
+        paddingRight: isMobile ? "max(16px, env(safe-area-inset-right))" : "max(28px, env(safe-area-inset-right))",
+      }}>
         <div style={s.headerLeft}>
           <span style={{ fontSize: 22 }}>🛡️</span>
-          <span style={s.headerTitle}>{t("app.title")}</span>
+          <span style={s.headerTitle}>
+            <span className="hdr-full">{t("app.title")}</span>
+            <span className="hdr-short">PC Guard</span>
+          </span>
         </div>
         <div style={s.headerRight}>
           {isLive && (
             <span style={s.liveBadge}>
               <span style={s.liveDot} />
-              {t("dashboard.live")}
+              <span className="btn-lbl">{t("dashboard.live")}</span>
             </span>
           )}
           <button onClick={toggleLang} style={s.ghostBtn}>
-            {i18n.language === "en" ? "עברית" : "English"}
+            🌐 <span className="btn-lbl">{i18n.language === "en" ? "עברית" : "English"}</span>
           </button>
           <button
             onClick={() => navigate(`/device/${deviceId}/report`, { state: { deviceId } })}
             style={s.ghostBtn}
             disabled={!latestScan}
           >
-            {t("nav.reports")}
+            📋 <span className="btn-lbl">{t("nav.reports")}</span>
           </button>
           <button onClick={() => signOut(auth).then(() => navigate("/login"))} style={s.ghostBtn}>
-            {t("nav.logout")}
+            ⏻ <span className="btn-lbl">{t("nav.logout")}</span>
           </button>
         </div>
       </header>
 
-      <main style={s.main}>
+      <main style={{ ...s.main, padding: isMobile ? "16px 14px" : "24px", paddingBottom: "max(32px, env(safe-area-inset-bottom))" }}>
 
         {/* ── Breadcrumb + device name ───────────────────────────────────── */}
         <div style={s.breadcrumb}>
@@ -756,7 +766,7 @@ export default function DeviceDashboard({ user }) {
         )}
 
         {/* ── Tab bar ───────────────────────────────────────────────────── */}
-        <div style={s.tabBar}>
+        <div style={s.tabBar} className="tab-scroll">
           {[
             { id: "overview",  label: `📊 ${t("report.tabs.overview")}` },
             { id: "network",   label: `🌐 ${t("network.title")}` },
@@ -773,27 +783,22 @@ export default function DeviceDashboard({ user }) {
         </div>
 
         {/* ── ROW 1: Gauges ─────────────────────────────────────────────── */}
-        <div style={s.gaugeRow}>
-          <div style={s.gaugeCard}>
-            <CircularGauge value={cpuPct} label={t("dashboard.cpu")} color={gaugeColor(cpuPct)} />
-          </div>
-          <div style={s.gaugeCard}>
-            <CircularGauge
-              value={ramPct} label={t("dashboard.ram")}
-              sublabel={ramUsedGB != null ? `${ramUsedGB} / ${ramTotalGB} GB` : undefined}
-              color={gaugeColor(ramPct)}
-            />
-          </div>
-          <div style={s.gaugeCard}>
-            <CircularGauge
-              value={disk?.pct ?? null} label={t("dashboard.disk")}
-              sublabel={disk ? `${disk.used} / ${disk.total} GB` : undefined}
-              color={gaugeColor(disk?.pct)}
-            />
-          </div>
-          <div style={s.gaugeCard}>
-            <CircularGauge value={health} label={t("dashboard.healthScore")} color={healthColor(health)} />
-          </div>
+        <div className="rg-gauges">
+          {[
+            { value: cpuPct,       label: t("dashboard.cpu"),         color: gaugeColor(cpuPct) },
+            { value: ramPct,       label: t("dashboard.ram"),         color: gaugeColor(ramPct),
+              sublabel: ramUsedGB != null ? `${ramUsedGB} / ${ramTotalGB} GB` : undefined },
+            { value: disk?.pct ?? null, label: t("dashboard.disk"),  color: gaugeColor(disk?.pct),
+              sublabel: disk ? `${disk.used} / ${disk.total} GB` : undefined },
+            { value: health,       label: t("dashboard.healthScore"), color: healthColor(health) },
+          ].map(({ value, label, color, sublabel }) => (
+            <div key={label} style={{ ...s.gaugeCard, padding: isMobile ? "16px 8px" : "24px 16px" }}>
+              <CircularGauge
+                value={value} label={label} color={color} sublabel={sublabel}
+                size={isMobile ? 100 : isTablet ? 120 : 136}
+              />
+            </div>
+          ))}
         </div>
 
         {/* ── ROW 2: Info cards (Overview tab) ──────────────────────────── */}
@@ -808,7 +813,7 @@ export default function DeviceDashboard({ user }) {
             t={t}
           />
         ) : null}
-        <div style={{ ...s.cardRow, display: activeTab === "overview" ? s.cardRow.display : "none" }}>
+        <div className="rg-cards" style={{ display: activeTab === "overview" ? "grid" : "none" }}>
 
           {/* Top Processes */}
           <div style={s.infoCard}>
@@ -1105,7 +1110,8 @@ const s = {
   },
   breadcrumbLink: {
     background: "transparent", border: "none", color: "#58a6ff",
-    cursor: "pointer", fontSize: 14, padding: 0,
+    cursor: "pointer", fontSize: 14, padding: "8px 4px",
+    minHeight: 44, display: "inline-flex", alignItems: "center",
   },
   breadcrumbSep:     { color: "#4a5568", fontSize: 14 },
   breadcrumbCurrent: { display: "flex", alignItems: "center", gap: 6, fontSize: 15 },
