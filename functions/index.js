@@ -214,8 +214,15 @@ exports.realtimeHeartbeat = onRequest(async (req, res) => {
   if (req.method === "OPTIONS") { res.status(204).send(""); return; }
   if (req.method !== "POST")    { res.status(405).json({ error: "POST required" }); return; }
 
-  const { token, deviceId, cpu_percent, ram_percent, ram_used_gb, ram_total_gb,
-          top_processes, temperatures, network, current_user, current_users } = req.body;
+  const body = req.body;
+  const { token, deviceId, temperatures, network, current_user, current_users } = body;
+
+  // Accept both snake_case (Windows / correct) and camelCase (older Linux agent)
+  const cpu_percent  = body.cpu_percent  ?? body.cpu        ?? null;
+  const ram_percent  = body.ram_percent  ?? body.ramPercent ?? null;
+  const ram_used_gb  = body.ram_used_gb  ?? body.ramUsedGB  ?? null;
+  const ram_total_gb = body.ram_total_gb ?? body.ramTotalGB ?? null;
+  const top_processes = body.top_processes ?? body.topProcesses ?? [];
 
   const uid = await resolveToken(token);
   if (!uid) return res.status(401).json({ error: "Invalid or unknown AgentToken" });
@@ -225,11 +232,11 @@ exports.realtimeHeartbeat = onRequest(async (req, res) => {
   const now       = admin.firestore.FieldValue.serverTimestamp();
 
   await deviceRef.collection("realtime").doc("current").set({
-    cpu_percent:   cpu_percent   ?? null,
-    ram_percent:   ram_percent   ?? null,
-    ram_used_gb:   ram_used_gb   ?? null,
-    ram_total_gb:  ram_total_gb  ?? null,
-    top_processes: top_processes ?? [],
+    cpu_percent,
+    ram_percent,
+    ram_used_gb,
+    ram_total_gb,
+    top_processes,
     temperatures:  temperatures  ?? [],
     updatedAt:     now,
   });

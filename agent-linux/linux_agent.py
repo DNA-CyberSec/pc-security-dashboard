@@ -758,13 +758,13 @@ def send_realtime_heartbeat() -> None:
 
     top_procs = []
     try:
-        raw = list(psutil.process_iter(["pid", "name", "cpu_percent"]))
+        raw = list(psutil.process_iter(["pid", "name", "cpu_percent", "memory_info"]))
         raw.sort(key=lambda p: p.info.get("cpu_percent") or 0, reverse=True)
         for p in raw[:5]:
             top_procs.append({
-                "pid": p.info["pid"],
-                "name": p.info["name"],
-                "cpu_percent": p.info.get("cpu_percent") or 0.0,
+                "name":   p.info["name"] or "",
+                "cpu":    round(p.info.get("cpu_percent") or 0.0, 1),
+                "ram_mb": round((p.info["memory_info"].rss if p.info.get("memory_info") else 0) / 1e6, 1),
             })
     except Exception:
         pass
@@ -791,11 +791,11 @@ def send_realtime_heartbeat() -> None:
         "deviceName": DEVICE_NAME,
         "agentVersion": AGENT_VERSION,
         "os": "Linux",
-        "cpu": cpu,
-        "ramPercent": ram_percent,
-        "ramUsedGB": ram_used_gb,
-        "ramTotalGB": ram_total_gb,
-        "topProcesses": top_procs,
+        "cpu_percent": round(cpu, 1),
+        "ram_percent": ram_percent,
+        "ram_used_gb": ram_used_gb,
+        "ram_total_gb": ram_total_gb,
+        "top_processes": top_procs,
         "temperatures": temps,
         "network": _net_cache,
         "uptime_seconds": uptime_seconds,
