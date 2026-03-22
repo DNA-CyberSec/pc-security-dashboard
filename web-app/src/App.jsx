@@ -7,6 +7,7 @@ import Dashboard from "./pages/Dashboard";
 import DeviceDashboard from "./pages/DeviceDashboard";
 import Report from "./pages/Report";
 import Setup from "./pages/Setup";
+import Admin from "./pages/Admin";
 import Footer from "./components/Footer";
 import "./i18n";
 
@@ -70,6 +71,14 @@ export default function App() {
               element={
                 <ProtectedRoute user={user}>
                   <Setup user={user} />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/admin"
+              element={
+                <ProtectedRoute user={user}>
+                  <Admin user={user} />
                 </ProtectedRoute>
               }
             />

@@ -734,7 +734,8 @@ def _safe(name: str, fn, default=None):
 # Agent actions
 # ---------------------------------------------------------------------------
 
-def send_heartbeat() -> None:
+def send_heartbeat() -> dict:
+    """Send liveness ping. Returns the response body (may contain heartbeat_paused)."""
     status, body = _post(HEARTBEAT_URL, {
         "token": AGENT_TOKEN,
         "deviceId": DEVICE_ID,
@@ -748,6 +749,45 @@ def send_heartbeat() -> None:
         logger.info("Heartbeat OK")
     else:
         logger.warning("Heartbeat failed (status=%s body=%s)", status, body)
+    return body if isinstance(body, dict) else {}
+
+
+def _handle_heartbeat_paused() -> None:
+    """
+    Server has paused heartbeats (e.g. daily Firestore write limit exceeded).
+    Clear all scheduled tasks, then poll every 5 minutes for up to 1 hour.
+    Once the server lifts the pause, restore the normal schedule.
+    """
+    logger.warning(
+        "Heartbeats paused by server. Clearing schedule and retrying every 5 min …"
+    )
+    schedule.clear()
+
+    _POLL_INTERVAL = 300   # 5 minutes
+    _MAX_POLLS     = 12    # 12 × 5 min = 1 hour
+
+    for _ in range(_MAX_POLLS):
+        time.sleep(_POLL_INTERVAL)
+        status, body = _post(HEARTBEAT_URL, {
+            "token":        AGENT_TOKEN,
+            "deviceId":     DEVICE_ID,
+            "deviceName":   DEVICE_NAME,
+            "hostname":     DEVICE_NAME,
+            "agentVersion": AGENT_VERSION,
+            "readOnlyMode": False,
+            "os":           "Linux",
+        })
+        paused = isinstance(body, dict) and body.get("heartbeat_paused", True)
+        if status == 200 and not paused:
+            logger.info("Pause lifted. Resuming normal operation.")
+            schedule.every(HEARTBEAT_SECS).seconds.do(send_heartbeat)
+            schedule.every(SCAN_INTERVAL).seconds.do(run_scan)
+            schedule.every(10).seconds.do(send_realtime_heartbeat)
+            return
+
+    # Still paused after 1 hour — restore only the heartbeat so we keep checking
+    logger.warning("Still paused after 1 hour. Re-scheduling heartbeat only.")
+    schedule.every(HEARTBEAT_SECS).seconds.do(send_heartbeat)
 
 
 def send_realtime_heartbeat() -> None:
@@ -992,12 +1032,20 @@ def main() -> None:
     DEVICE_ID = resolve_device_id(cfg)
     logger.info("Device ID: %s", DEVICE_ID)
 
-    # Immediate startup actions
-    send_heartbeat()
-    run_scan()
+    # Immediate startup: check system status before proceeding
+    startup_body = send_heartbeat()
+    if startup_body.get("heartbeat_paused"):
+        _handle_heartbeat_paused()
+    else:
+        run_scan()
+
+    def _scheduled_heartbeat():
+        body = send_heartbeat()
+        if body.get("heartbeat_paused"):
+            _handle_heartbeat_paused()
 
     # Schedule recurring tasks
-    schedule.every(HEARTBEAT_SECS).seconds.do(send_heartbeat)
+    schedule.every(HEARTBEAT_SECS).seconds.do(_scheduled_heartbeat)
     schedule.every(SCAN_INTERVAL).seconds.do(run_scan)
     schedule.every(10).seconds.do(send_realtime_heartbeat)
 

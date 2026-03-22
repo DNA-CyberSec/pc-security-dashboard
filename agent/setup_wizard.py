@@ -141,8 +141,8 @@ if BACKGROUND_MODE:
             log.warning(f"Network error → {url}: {e}")
             return 0, {}
 
-    def send_heartbeat():
-        status, _ = _post(HEARTBEAT_URL, {
+    def _heartbeat_payload():
+        return {
             "token":        AGENT_TOKEN,
             "deviceId":     DEVICE_ID,
             "deviceName":   DEVICE_NAME,
@@ -151,9 +151,38 @@ if BACKGROUND_MODE:
             "agentVersion": AGENT_VERSION,
             "readOnlyMode": True,
             "os":           "Windows",
-        })
+        }
+
+    def send_heartbeat() -> dict:
+        """Send liveness ping. Returns response body (may contain heartbeat_paused)."""
+        status, body = _post(HEARTBEAT_URL, _heartbeat_payload())
         if status == 401:
             log.error("Invalid AgentToken — reinstall PCGuard from pcguard-rami.web.app")
+        return body if isinstance(body, dict) else {}
+
+    def _handle_heartbeat_paused():
+        """
+        Server has paused heartbeats. Clear schedule, poll every 5 min for up to
+        1 hour, then restore normal schedule once the pause is lifted.
+        """
+        log.warning("Heartbeats paused by server. Retrying every 5 min …")
+        schedule.clear()
+        _POLL_INTERVAL = 300   # 5 minutes
+        _MAX_POLLS     = 12    # 12 × 5 min = 1 hour
+        for _ in range(_MAX_POLLS):
+            time.sleep(_POLL_INTERVAL)
+            if _stop.is_set():
+                return
+            status, body = _post(HEARTBEAT_URL, _heartbeat_payload())
+            paused = isinstance(body, dict) and body.get("heartbeat_paused", True)
+            if status == 200 and not paused:
+                log.info("Pause lifted. Resuming normal operation.")
+                schedule.every(HEARTBEAT_SECS).seconds.do(_scheduled_heartbeat)
+                schedule.every(SCAN_INTERVAL).seconds.do(run_scan)
+                schedule.every(10).seconds.do(send_realtime_heartbeat)
+                return
+        log.warning("Still paused after 1 hour. Re-scheduling heartbeat only.")
+        schedule.every(HEARTBEAT_SECS).seconds.do(_scheduled_heartbeat)
 
     def _safe(name, fn):
         try:
@@ -281,11 +310,19 @@ if BACKGROUND_MODE:
         except Exception as e:
             log.debug(f"Realtime heartbeat error: {e}")
 
+    def _scheduled_heartbeat():
+        body = send_heartbeat()
+        if body.get("heartbeat_paused"):
+            _handle_heartbeat_paused()
+
     def _agent_loop():
         """Runs in a background thread — heartbeat + scheduled scans."""
-        send_heartbeat()
-        run_scan()
-        schedule.every(HEARTBEAT_SECS).seconds.do(send_heartbeat)
+        startup_body = send_heartbeat()
+        if startup_body.get("heartbeat_paused"):
+            _handle_heartbeat_paused()
+        else:
+            run_scan()
+        schedule.every(HEARTBEAT_SECS).seconds.do(_scheduled_heartbeat)
         schedule.every(SCAN_INTERVAL).seconds.do(run_scan)
         schedule.every(10).seconds.do(send_realtime_heartbeat)
         log.info(f"PCGuard v{AGENT_VERSION} running (heartbeat={HEARTBEAT_SECS}s, scan={SCAN_INTERVAL}s)")

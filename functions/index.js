@@ -3,13 +3,15 @@
  *
  * Endpoints:
  *  generateAgentToken       — callable (auth required) — creates / returns user's AgentToken
- *  agentHeartbeat           — HTTP POST — agent sends liveness ping
+ *  agentHeartbeat           — HTTP POST — agent sends liveness ping + receives system status
  *  submitScan               — HTTP POST — agent submits full scan data
  *  realtimeHeartbeat        — HTTP POST — agent sends lightweight CPU/RAM every 10s (rate-limited: 1/8s)
- *  getScanRecommendations   — callable (auth required) — Claude AI analysis
- *  explainIssue             — callable (auth required) — explain a single issue
- *  onScanCreated            — Firestore trigger — auto-generate AI recommendations
+ *  getScanRecommendations   — callable (auth required) — Claude AI analysis (billing-capped: 500/month)
+ *  explainIssue             — callable (auth required) — explain a single issue (billing-capped)
+ *  onScanCreated            — Firestore trigger — auto-generate AI recommendations (billing-capped)
  *  cleanupOldScans          — scheduled daily — delete scan docs older than 90 days
+ *  getAdminStats            — callable (admin only) — read billing usage + system status
+ *  setAdminOverride         — callable (admin only) — toggle heartbeat_paused / ai_disabled
  *
  * Multi-device Firestore structure (per device):
  *  /users/{uid}/devices/{deviceId}               ← device status + summary
@@ -115,6 +117,89 @@ function checkPayloadSize(req, res) {
   return true;
 }
 
+// ── Billing protection ────────────────────────────────────────────────────────
+
+const CLAUDE_MONTHLY_LIMIT = 500;
+const DAILY_WRITE_LIMIT    = 15_000;
+
+/**
+ * Returns true when a Claude call is allowed:
+ *   1. Admin hasn't manually disabled AI (/config/systemStatus.ai_disabled)
+ *   2. Monthly call count < CLAUDE_MONTHLY_LIMIT
+ */
+async function isClaudeAllowed() {
+  const [usageSnap, statusSnap] = await Promise.all([
+    db.collection("config").doc("apiUsage").get(),
+    db.collection("config").doc("systemStatus").get(),
+  ]);
+  if (statusSnap.exists && statusSnap.data().ai_disabled) return false;
+  const usage    = usageSnap.exists ? usageSnap.data() : {};
+  const monthKey = new Date().toISOString().slice(0, 7); // e.g. "2026-03"
+  if (usage.month !== monthKey) return true;             // new month → reset
+  return (usage.claude_calls_this_month || 0) < CLAUDE_MONTHLY_LIMIT;
+}
+
+/** Fire-and-forget: increment the Claude call counter for the current month. */
+function incrementClaudeCount() {
+  const monthKey = new Date().toISOString().slice(0, 7);
+  const ref = db.collection("config").doc("apiUsage");
+  ref.get().then(snap => {
+    if (snap.exists && snap.data().month === monthKey) {
+      return ref.update({ claude_calls_this_month: admin.firestore.FieldValue.increment(1) });
+    }
+    return ref.set({ month: monthKey, claude_calls_this_month: 1 }, { merge: true });
+  }).catch(e => console.error("incrementClaudeCount:", e));
+}
+
+/**
+ * Fire-and-forget: add `count` estimated writes to today's rolling counter.
+ * If the total exceeds DAILY_WRITE_LIMIT, auto-sets heartbeat_paused = true.
+ */
+function trackFirestoreWrites(count) {
+  const dateKey = new Date().toISOString().slice(0, 10);
+  const ref = db.collection("config").doc("apiUsage");
+  ref.get().then(async snap => {
+    const data = snap.exists ? snap.data() : {};
+    let newTotal;
+    if (data.writes_date !== dateKey) {
+      await ref.set({ writes_date: dateKey, firestore_writes_today: count }, { merge: true });
+      newTotal = count;
+    } else {
+      await ref.update({ firestore_writes_today: admin.firestore.FieldValue.increment(count) });
+      newTotal = (data.firestore_writes_today || 0) + count;
+    }
+    if (newTotal >= DAILY_WRITE_LIMIT) {
+      const statusRef  = db.collection("config").doc("systemStatus");
+      const statusSnap = await statusRef.get();
+      if (!statusSnap.exists || !statusSnap.data().heartbeat_paused) {
+        await statusRef.set({
+          heartbeat_paused: true,
+          paused_reason:    "daily_write_limit_exceeded",
+          paused_at:        admin.firestore.FieldValue.serverTimestamp(),
+        }, { merge: true });
+        console.warn(`Auto-paused heartbeats: daily writes ${newTotal} >= ${DAILY_WRITE_LIMIT}`);
+      }
+    }
+  }).catch(e => console.error("trackFirestoreWrites:", e));
+}
+
+/**
+ * Verify that the callable caller is listed in /config/system.adminUids.
+ * One-time setup: in Firebase console set /config/system → { adminUids: ["your-uid"] }
+ */
+async function requireAdmin(request) {
+  if (!request.auth) throw new HttpsError("unauthenticated", "Authentication required");
+  const sysSnap = await db.collection("config").doc("system").get();
+  if (!sysSnap.exists) {
+    throw new HttpsError("not-found",
+      "Admin not configured — add /config/system { adminUids: ['your-uid'] } in Firebase console");
+  }
+  const adminUids = sysSnap.data().adminUids || [];
+  if (!adminUids.includes(request.auth.uid)) {
+    throw new HttpsError("permission-denied", "Admin access required");
+  }
+}
+
 // ── generateAgentToken ────────────────────────────────────────────────────────
 
 exports.generateAgentToken = onCall(async (request) => {
@@ -195,7 +280,14 @@ exports.agentHeartbeat = onRequest(async (req, res) => {
     }
   }
 
-  res.json({ ok: true });
+  // Return current system status so agents can self-pause / re-enable AI
+  const statusSnap = await db.collection("config").doc("systemStatus").get();
+  const sd = statusSnap.exists ? statusSnap.data() : {};
+  res.json({
+    ok:               true,
+    heartbeat_paused: sd.heartbeat_paused || false,
+    ai_disabled:      sd.ai_disabled      || false,
+  });
 });
 
 // ── submitScan ────────────────────────────────────────────────────────────────
@@ -297,6 +389,17 @@ exports.realtimeHeartbeat = onRequest(async (req, res) => {
 
   const uid = await resolveToken(token);
   if (!uid) return res.status(401).json({ error: "Invalid or unknown AgentToken" });
+
+  // Check whether heartbeats are paused before doing any expensive work
+  const statusSnap    = await db.collection("config").doc("systemStatus").get();
+  const heartbeatPaused = statusSnap.exists && statusSnap.data().heartbeat_paused === true;
+  if (heartbeatPaused) {
+    return res.status(503).json({
+      error:            "Agent heartbeats temporarily paused",
+      heartbeat_paused: true,
+      retry_after:      3600,
+    });
+  }
 
   // Rate limit: max 1 realtimeHeartbeat per 8 seconds per token
   const allowed = await checkRateLimit(token);
@@ -400,6 +503,9 @@ exports.realtimeHeartbeat = onRequest(async (req, res) => {
     }
   } catch (_) {}
 
+  // Track Firestore writes for billing protection (~4 writes per realtime heartbeat)
+  trackFirestoreWrites(4);
+
   res.json({ ok: true, pendingCommands });
 });
 
@@ -427,7 +533,12 @@ exports.getScanRecommendations = onCall(
       return { recommendations: snap.data().aiRecommendations, cached: true };
     }
 
+    if (!(await isClaudeAllowed())) {
+      throw new HttpsError("resource-exhausted", "AI analysis temporarily unavailable — monthly limit reached");
+    }
+
     const recommendations = await generateRecommendations(snap.data(), language);
+    incrementClaudeCount();
 
     await scanRef.update({
       aiRecommendations:     recommendations,
@@ -449,7 +560,12 @@ exports.explainIssue = onCall(
     const { issue, language = "en" } = request.data;
     if (!issue) throw new HttpsError("invalid-argument", "issue required");
 
+    if (!(await isClaudeAllowed())) {
+      throw new HttpsError("resource-exhausted", "AI analysis temporarily unavailable — monthly limit reached");
+    }
+
     const explanation = await claudeExplain(issue, language);
+    incrementClaudeCount();
     return { explanation };
   }
 );
@@ -504,8 +620,15 @@ exports.onScanCreated = onDocumentCreated(
       if (userSnap.exists) language = userSnap.data().language || "en";
     } catch (_) {}
 
+    // Respect billing cap before calling Claude
+    if (!(await isClaudeAllowed())) {
+      console.log(`AI generation skipped (billing cap) for ${uid}/devices/${deviceId}/scans/${scanId}`);
+      return;
+    }
+
     try {
       const recommendations = await generateRecommendations(scan, language);
+      incrementClaudeCount();
       await db.collection("users").doc(uid)
         .collection("devices").doc(deviceId)
         .collection("scans").doc(scanId)
@@ -695,4 +818,55 @@ exports.cleanupOldScans = onSchedule("every 24 hours", async () => {
   snap.docs.forEach(doc => batch.delete(doc.ref));
   await batch.commit();
   console.log(`cleanupOldScans: deleted ${snap.docs.length} scans older than 90 days.`);
+});
+
+// ── getAdminStats ─────────────────────────────────────────────────────────────
+// Callable (admin only): returns current billing usage and system status.
+// One-time setup: create /config/system { adminUids: ["your-firebase-uid"] }
+
+exports.getAdminStats = onCall(async (request) => {
+  await requireAdmin(request);
+
+  const [usageSnap, statusSnap] = await Promise.all([
+    db.collection("config").doc("apiUsage").get(),
+    db.collection("config").doc("systemStatus").get(),
+  ]);
+
+  return {
+    usage:  usageSnap.exists  ? usageSnap.data()  : {},
+    status: statusSnap.exists ? statusSnap.data() : {},
+    limits: {
+      claude_monthly_limit: CLAUDE_MONTHLY_LIMIT,
+      daily_write_limit:    DAILY_WRITE_LIMIT,
+    },
+  };
+});
+
+// ── setAdminOverride ──────────────────────────────────────────────────────────
+// Callable (admin only): toggle heartbeat_paused and/or ai_disabled.
+
+exports.setAdminOverride = onCall(async (request) => {
+  await requireAdmin(request);
+
+  const { heartbeat_paused, ai_disabled } = request.data;
+  const update = {};
+
+  if (heartbeat_paused !== undefined) {
+    update.heartbeat_paused = Boolean(heartbeat_paused);
+    if (!heartbeat_paused) {
+      // Clear auto-pause metadata when manually resuming
+      update.paused_reason = null;
+      update.paused_at     = null;
+    }
+  }
+  if (ai_disabled !== undefined) {
+    update.ai_disabled = Boolean(ai_disabled);
+  }
+  if (Object.keys(update).length === 0) {
+    throw new HttpsError("invalid-argument", "Provide heartbeat_paused and/or ai_disabled");
+  }
+
+  await db.collection("config").doc("systemStatus").set(update, { merge: true });
+  console.log(`Admin override by ${request.auth.uid}:`, update);
+  return { ok: true };
 });
