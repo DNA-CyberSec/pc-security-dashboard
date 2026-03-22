@@ -5,6 +5,101 @@ import { signOut } from "firebase/auth";
 import { collection, doc, onSnapshot, setDoc } from "firebase/firestore";
 import { auth, db } from "../firebase";
 
+// ── Update Modal ───────────────────────────────────────────────────────────────
+
+function UpdateModal({ device, latestVersion, onClose, t }) {
+  const isLinux  = device.os === "Linux";
+  const current  = device.agentVersion || "?";
+  const latest   = isLinux ? latestVersion.linux_version : latestVersion.windows_version;
+  const changelog = latestVersion.changelog || "";
+  const dlUrl    = `https://github.com/DNA-CyberSec/pc-security-dashboard/releases/latest/download/PCGuard-Setup.exe`;
+  const linuxCmd = "curl -sSL https://pcguard-rami.web.app/install.sh | bash";
+  const [copied, setCopied] = useState(false);
+
+  const copyCmd = () => {
+    navigator.clipboard.writeText(linuxCmd).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000); });
+  };
+
+  return (
+    <div style={ms.overlay} onClick={onClose}>
+      <div style={ms.modal} onClick={e => e.stopPropagation()}>
+        <div style={ms.header}>
+          <span style={{ fontSize: 20 }}>🔄</span>
+          <p style={ms.title}>{t("version.updateTitle")}</p>
+          <button onClick={onClose} style={ms.closeBtn}>✕</button>
+        </div>
+        <p style={ms.desc}>{t("version.updateDesc")}</p>
+        <div style={ms.versionRow}>
+          <div style={ms.versionBox}>
+            <p style={ms.versionLabel}>{t("version.current")}</p>
+            <p style={{ ...ms.versionNum, color: "#fc8181" }}>{current}</p>
+          </div>
+          <span style={{ color: "#4a5568", fontSize: 20 }}>→</span>
+          <div style={ms.versionBox}>
+            <p style={ms.versionLabel}>{t("version.latest")}</p>
+            <p style={{ ...ms.versionNum, color: "#56d364" }}>{latest || "?"}</p>
+          </div>
+        </div>
+        {changelog && (
+          <div style={ms.changelog}>
+            <p style={ms.changelogTitle}>{t("version.changelog")}</p>
+            <p style={ms.changelogText}>{changelog}</p>
+          </div>
+        )}
+        <div style={ms.actions}>
+          {isLinux ? (
+            <>
+              <p style={{ fontSize: 12, color: "#8b949e", marginBottom: 6 }}>{t("version.linuxUpdateCmd")}</p>
+              <div style={{ display: "flex", gap: 8 }}>
+                <code style={ms.cmd}>{linuxCmd}</code>
+                <button onClick={copyCmd} style={ms.copyBtn}>
+                  {copied ? "✓" : t("setup.copy")}
+                </button>
+              </div>
+            </>
+          ) : (
+            <a href={dlUrl} target="_blank" rel="noreferrer" style={ms.dlBtn}>
+              ⬇ {t("version.downloadWindows")}
+            </a>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const ms = {
+  overlay:  { position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", zIndex: 100,
+               display: "flex", alignItems: "center", justifyContent: "center" },
+  modal:    { background: "#161b22", border: "1px solid #30363d", borderRadius: 14,
+               padding: "28px 32px", width: 440, maxWidth: "90vw" },
+  header:   { display: "flex", alignItems: "center", gap: 10, marginBottom: 12 },
+  title:    { flex: 1, fontSize: 16, fontWeight: 700, color: "#e2e8f0", margin: 0 },
+  closeBtn: { background: "transparent", border: "none", color: "#8b949e",
+               cursor: "pointer", fontSize: 18, padding: 0 },
+  desc:     { color: "#8b949e", fontSize: 13, marginBottom: 20, margin: "0 0 20px" },
+  versionRow: { display: "flex", alignItems: "center", gap: 20, marginBottom: 20 },
+  versionBox: { flex: 1, background: "#0d1117", border: "1px solid #21262d",
+                 borderRadius: 8, padding: "10px 14px", textAlign: "center" },
+  versionLabel: { fontSize: 11, color: "#8b949e", textTransform: "uppercase",
+                   letterSpacing: 1, margin: "0 0 4px" },
+  versionNum:   { fontSize: 18, fontWeight: 700, margin: 0, fontFamily: "monospace" },
+  changelog: { background: "#0d1117", border: "1px solid #21262d", borderRadius: 8,
+                padding: "10px 14px", marginBottom: 20 },
+  changelogTitle: { fontSize: 11, color: "#8b949e", textTransform: "uppercase",
+                     letterSpacing: 1, margin: "0 0 6px" },
+  changelogText:  { fontSize: 13, color: "#c9d1d9", margin: 0, lineHeight: 1.6 },
+  actions: { display: "flex", flexDirection: "column" },
+  cmd:  { flex: 1, background: "#0d1117", border: "1px solid #21262d", borderRadius: 6,
+           padding: "6px 10px", fontSize: 11, color: "#58a6ff", fontFamily: "monospace",
+           overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
+  copyBtn: { background: "#238636", color: "#fff", border: "none",
+              borderRadius: 6, padding: "6px 14px", cursor: "pointer", fontSize: 12 },
+  dlBtn: { display: "block", background: "#1f6feb", color: "#fff", border: "none",
+            borderRadius: 8, padding: "10px 20px", cursor: "pointer",
+            fontSize: 14, fontWeight: 600, textAlign: "center", textDecoration: "none" },
+};
+
 // ── Mini Circular Gauge ───────────────────────────────────────────────────────
 
 function MiniGauge({ value, size = 52, color }) {
@@ -88,7 +183,7 @@ function hasAlerts(device) {
 
 // ── Device Card (Grid Mode) ───────────────────────────────────────────────────
 
-function DeviceCard({ device, rt, online, onView, onEditNickname, t, isRTL }) {
+function DeviceCard({ device, rt, online, onView, onEditNickname, latestVersion, onUpdateClick, t, isRTL }) {
   const [flash, setFlash] = useState(false);
 
   useEffect(() => {
@@ -249,6 +344,50 @@ function DeviceCard({ device, rt, online, onView, onEditNickname, t, isRTL }) {
         </div>
       )}
 
+      {/* Logged-in user row */}
+      {device.current_username && (
+        <div style={{ ...s.cardSection, flexWrap: "wrap", gap: 4 }}>
+          <span style={{ fontSize: 12, color: "#8b949e" }}>👤</span>
+          <span style={{ fontSize: 12, color: "#c9d1d9" }}>{device.current_username}</span>
+          {device.current_user_is_admin && (
+            <span style={{ fontSize: 10, background: "#2d2008", border: "1px solid #7d4f00",
+                           color: "#f6ad55", borderRadius: 4, padding: "1px 5px" }}>
+              {t("users.admin")}
+            </span>
+          )}
+          {device.current_user_session_type && (
+            <span style={{ fontSize: 10, color: "#6e7681" }}>
+              ({t(`users.${device.current_user_session_type}`) || device.current_user_session_type})
+            </span>
+          )}
+          {device.active_session_count > 1 && (
+            <span style={{ fontSize: 10, color: "#8b949e" }}>+{device.active_session_count - 1}</span>
+          )}
+        </div>
+      )}
+
+      {/* Version badge */}
+      {device.agentVersion && latestVersion && (() => {
+        const expected = device.os === "Linux" ? latestVersion.linux_version : latestVersion.windows_version;
+        const isUpToDate = !expected || device.agentVersion === expected;
+        return (
+          <div style={{ ...s.cardSection }}>
+            <span
+              onClick={e => { e.stopPropagation(); if (!isUpToDate) onUpdateClick(); }}
+              style={{
+                fontSize: 10, padding: "2px 7px", borderRadius: 10,
+                cursor: isUpToDate ? "default" : "pointer",
+                background: isUpToDate ? "#0d2818" : "#2d2008",
+                color:      isUpToDate ? "#56d364" : "#f6ad55",
+                border:     `1px solid ${isUpToDate ? "#238636" : "#7d4f00"}`,
+              }}
+            >
+              v{device.agentVersion} {isUpToDate ? `✓ ${t("version.upToDate")}` : `⬆ ${t("version.updateAvailable")}`}
+            </span>
+          </div>
+        );
+      })()}
+
       {/* View button */}
       <button
         onClick={e => { e.stopPropagation(); onView(); }}
@@ -277,8 +416,20 @@ export default function Dashboard({ user }) {
   const [sortDir,        setSortDir]         = useState("asc");
   const [editingDevice,  setEditingDevice]   = useState(null);   // deviceId being renamed
   const [nicknameInput,  setNicknameInput]   = useState("");
+  const [latestVersion,  setLatestVersion]   = useState(null);   // /config/latestAgentVersion
+  const [updateModal,    setUpdateModal]     = useState(null);   // device object or null
 
   const realtimeUnsubsRef = useRef({});
+
+  // ── Subscribe to latest agent version ─────────────────────────────────────
+  useEffect(() => {
+    const unsub = onSnapshot(
+      doc(db, "config", "latestAgentVersion"),
+      snap => { if (snap.exists()) setLatestVersion(snap.data()); },
+      () => {},
+    );
+    return () => unsub();
+  }, []);
 
   // ── Subscribe to all devices ──────────────────────────────────────────────
   useEffect(() => {
@@ -530,6 +681,8 @@ export default function Dashboard({ user }) {
                         setNicknameInput(device.nickname || "");
                         setEditingDevice(device.id);
                       }}
+                      latestVersion={latestVersion}
+                      onUpdateClick={() => setUpdateModal(device)}
                       t={t}
                       isRTL={isRTL}
                     />
@@ -676,6 +829,16 @@ export default function Dashboard({ user }) {
           </>
         )}
       </main>
+
+      {/* Update modal */}
+      {updateModal && latestVersion && (
+        <UpdateModal
+          device={updateModal}
+          latestVersion={latestVersion}
+          onClose={() => setUpdateModal(null)}
+          t={t}
+        />
+      )}
     </div>
   );
 }

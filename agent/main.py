@@ -37,7 +37,15 @@ from modules.network_info import NetworkInfo
 
 load_dotenv()
 
-AGENT_VERSION   = "0.5.0"
+def _read_version() -> str:
+    try:
+        _dir = os.path.dirname(os.path.abspath(__file__))
+        with open(os.path.join(_dir, "VERSION")) as _f:
+            return _f.read().strip()
+    except Exception:
+        return "1.0.0"
+
+AGENT_VERSION   = _read_version()
 AGENT_TOKEN     = os.getenv("AGENT_TOKEN", "")
 SCAN_INTERVAL   = int(os.getenv("SCAN_INTERVAL",       "300"))  # seconds
 HEARTBEAT_SECS  = int(os.getenv("HEARTBEAT_INTERVAL",  "60"))
@@ -147,19 +155,21 @@ def run_scan():
     log.info("=" * 60)
     log.info("Starting full system scan...")
 
+    sc = Scanner()
     scan = {
         "agentVersion":      AGENT_VERSION,
         "hostname":          socket.gethostname(),
         "healthScore":       None,
-        "storage":           _safe("storage",         Scanner().scan_all_drives),
-        "tempSummary":       _safe("temp_summary",    Scanner().scan_temp_summary),
-        "largeFiles":        _safe("large_files",     Scanner().scan_large_files),
-        "startupItems":      _safe("startup_items",   Scanner().scan_startup_items),
-        "installedSoftware": _safe("installed_sw",    Scanner().scan_installed_software),
-        "vulnerabilities":   _safe("vulnerabilities", Scanner().scan_vulnerabilities),
-        "malwareSuspects":   _safe("malware",         Scanner().scan_malware_suspects),
-        "startupSecurity":   _safe("startup_sec",     Scanner().scan_startup_security),
-        "firewallStatus":    _safe("firewall",        Scanner().scan_firewall_status),
+        "storage":           _safe("storage",         sc.scan_all_drives),
+        "tempSummary":       _safe("temp_summary",    sc.scan_temp_summary),
+        "largeFiles":        _safe("large_files",     sc.scan_large_files),
+        "startupItems":      _safe("startup_items",   sc.scan_startup_items),
+        "installedSoftware": _safe("installed_sw",    sc.scan_installed_software),
+        "vulnerabilities":   _safe("vulnerabilities", sc.scan_vulnerabilities),
+        "malwareSuspects":   _safe("malware",         sc.scan_malware_suspects),
+        "startupSecurity":   _safe("startup_sec",     sc.scan_startup_security),
+        "firewallStatus":    _safe("firewall",        sc.scan_firewall_status),
+        "localUsers":        _safe("local_users",     sc.get_local_users),
         "processes":         _safe("processes",       ProcessScanner().scan_processes),
         "networkConnections":_safe("network",         NetworkScanner().scan_connections),
         "browserData":       _safe("browser",         PrivacyScanner().scan_browser_data),
@@ -230,12 +240,18 @@ def _health_score(scan: dict) -> int:
     dangerous_ports = sum(1 for p in net.get("open_ports", []) if p.get("dangerous"))
     score -= min(dangerous_ports * 15, 30)
 
+    admin_count = sum(1 for u in scan.get("localUsers", []) if u.get("is_admin"))
+    if admin_count > 2:
+        score -= 5
+
     return max(0, min(100, score))
 
-# ── Network cache (refreshed every 30s inside realtime heartbeat) ─────────────
+# ── Network + user cache (refreshed periodically inside realtime heartbeat) ───
 
-_net_cache     = {}
-_net_last_time = 0.0
+_net_cache      = {}
+_net_last_time  = 0.0
+_user_cache     = {}
+_user_last_time = 0.0
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 
@@ -254,7 +270,7 @@ def main():
         sys.exit(1)
 
     def send_realtime_heartbeat():
-        global _net_cache, _net_last_time
+        global _net_cache, _net_last_time, _user_cache, _user_last_time
         try:
             cpu = psutil.cpu_percent(interval=0.1)
             mem = psutil.virtual_memory()
@@ -286,6 +302,13 @@ def main():
                     _net_last_time = time.time()
                 except Exception as e:
                     log.debug(f"Network info error: {e}")
+            # Refresh current user info every 60 seconds
+            if time.time() - _user_last_time >= 60:
+                try:
+                    _user_cache     = Scanner().get_current_user()
+                    _user_last_time = time.time()
+                except Exception as e:
+                    log.debug(f"User info error: {e}")
             r = requests.post(REALTIME_URL, json={
                 "token":         AGENT_TOKEN,
                 "deviceId":      DEVICE_ID,
@@ -296,6 +319,7 @@ def main():
                 "top_processes": top5,
                 "temperatures":  temps,
                 "network":       _net_cache or None,
+                "current_user":  _user_cache or None,
             }, timeout=10)
             if r.status_code != 200:
                 log.debug(f"Realtime heartbeat: {r.status_code}")

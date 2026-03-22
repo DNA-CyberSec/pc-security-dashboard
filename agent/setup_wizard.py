@@ -14,7 +14,15 @@ import uuid
 
 # ── Constants shared by both modes ────────────────────────────────────────────
 
-AGENT_VERSION   = "0.6.0"
+def _read_version() -> str:
+    try:
+        _dir = os.path.dirname(os.path.abspath(__file__))
+        with open(os.path.join(_dir, "VERSION")) as _f:
+            return _f.read().strip()
+    except Exception:
+        return "1.0.0"
+
+AGENT_VERSION   = _read_version()
 INSTALL_DIR     = r"C:\pc-security-agent"
 EXE_NAME        = "pc-guard-agent.exe"
 CONFIG_FILE     = os.path.join(INSTALL_DIR, "config.json")
@@ -170,22 +178,27 @@ if BACKGROUND_MODE:
         if net.get("rdp_enabled"):
             score -= 5
         score -= min(sum(15 for pp in net.get("open_ports", []) if pp.get("dangerous")), 30)
+        admin_count = sum(1 for u in scan.get("localUsers", []) if u.get("is_admin"))
+        if admin_count > 2:
+            score -= 5
         return max(0, min(100, score))
 
     def run_scan():
         log.info("Scan started")
+        sc = Scanner()
         scan = {
             "agentVersion":       AGENT_VERSION,
             "hostname":           socket.gethostname(),
-            "storage":            _safe("storage",       Scanner().scan_all_drives),
-            "tempSummary":        _safe("temp",          Scanner().scan_temp_summary),
-            "largeFiles":         _safe("large_files",   Scanner().scan_large_files),
-            "startupItems":       _safe("startup",       Scanner().scan_startup_items),
-            "installedSoftware":  _safe("software",      Scanner().scan_installed_software),
-            "vulnerabilities":    _safe("vulns",         Scanner().scan_vulnerabilities),
-            "malwareSuspects":    _safe("malware",       Scanner().scan_malware_suspects),
-            "startupSecurity":    _safe("startup_sec",   Scanner().scan_startup_security),
-            "firewallStatus":     _safe("firewall",      Scanner().scan_firewall_status),
+            "storage":            _safe("storage",       sc.scan_all_drives),
+            "tempSummary":        _safe("temp",          sc.scan_temp_summary),
+            "largeFiles":         _safe("large_files",   sc.scan_large_files),
+            "startupItems":       _safe("startup",       sc.scan_startup_items),
+            "installedSoftware":  _safe("software",      sc.scan_installed_software),
+            "vulnerabilities":    _safe("vulns",         sc.scan_vulnerabilities),
+            "malwareSuspects":    _safe("malware",       sc.scan_malware_suspects),
+            "startupSecurity":    _safe("startup_sec",   sc.scan_startup_security),
+            "firewallStatus":     _safe("firewall",      sc.scan_firewall_status),
+            "localUsers":         _safe("local_users",   sc.get_local_users),
             "processes":          _safe("processes",     ProcessScanner().scan_processes),
             "networkConnections": _safe("network",       NetworkScanner().scan_connections),
             "browserData":        _safe("browser",       PrivacyScanner().scan_browser_data),
@@ -200,8 +213,10 @@ if BACKGROUND_MODE:
         else:
             log.error(f"Scan upload failed: HTTP {status}")
 
-    _net_cache     = {}
-    _net_last_time = [0.0]   # list so inner function can mutate it
+    _net_cache      = {}
+    _net_last_time  = [0.0]   # list so inner function can mutate it
+    _user_cache     = {}
+    _user_last_time = [0.0]
 
     def send_realtime_heartbeat():
         """Lightweight 10-second heartbeat with CPU/RAM/processes/temps/network."""
@@ -241,6 +256,15 @@ if BACKGROUND_MODE:
                 except Exception as ne:
                     log.debug(f"Network info error: {ne}")
 
+            # Refresh current user info every 60 seconds
+            if time.time() - _user_last_time[0] >= 60:
+                try:
+                    _user_cache.clear()
+                    _user_cache.update(Scanner().get_current_user())
+                    _user_last_time[0] = time.time()
+                except Exception as ue:
+                    log.debug(f"User info error: {ue}")
+
             _post(REALTIME_URL, {
                 "token":         AGENT_TOKEN,
                 "deviceId":      DEVICE_ID,
@@ -251,6 +275,7 @@ if BACKGROUND_MODE:
                 "top_processes": top5,
                 "temperatures":  temps,
                 "network":       dict(_net_cache) if _net_cache else None,
+                "current_user":  dict(_user_cache) if _user_cache else None,
             })
         except Exception as e:
             log.debug(f"Realtime heartbeat error: {e}")

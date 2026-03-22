@@ -430,6 +430,96 @@ class Scanner:
 
         return items
 
+    # ── Current logged-in user ────────────────────────────────────────────────
+
+    def get_current_user(self) -> dict:
+        """Returns info about the currently logged-in Windows user."""
+        import ctypes
+        username = os.environ.get("USERNAME", "unknown")
+        session_name = os.environ.get("SESSIONNAME", "")
+        session_type = "rdp" if session_name.lower().startswith("rdp") else "local"
+        is_admin = False
+        try:
+            is_admin = bool(ctypes.windll.shell32.IsUserAnAdmin())
+        except Exception:
+            pass
+        login_time = None
+        try:
+            for u in psutil.users():
+                if u.name.lower() == username.lower():
+                    login_time = u.started
+                    break
+        except Exception:
+            pass
+        return {
+            "username":     username,
+            "is_admin":     is_admin,
+            "session_type": session_type,
+            "login_time":   login_time,
+        }
+
+    # ── All local users ────────────────────────────────────────────────────────
+
+    def get_local_users(self) -> list:
+        """Returns all local Windows user accounts with admin status and last login."""
+        _NO_WIN = subprocess.CREATE_NO_WINDOW
+        admin_set = set()
+        try:
+            r = subprocess.run(
+                ["net", "localgroup", "Administrators"],
+                capture_output=True, text=True, timeout=10, creationflags=_NO_WIN,
+            )
+            if r.returncode == 0:
+                in_members = False
+                for line in r.stdout.splitlines():
+                    line = line.strip()
+                    if "---" in line:
+                        in_members = True
+                        continue
+                    if in_members and line and not line.startswith("The command"):
+                        admin_set.add(line.lower())
+        except Exception as e:
+            log.debug(f"get_local_users admin check: {e}")
+
+        users = []
+        try:
+            r = subprocess.run(
+                ["net", "user"],
+                capture_output=True, text=True, timeout=10, creationflags=_NO_WIN,
+            )
+            if r.returncode == 0:
+                for line in r.stdout.splitlines():
+                    line = line.strip()
+                    if not line or "---" in line or line.lower().startswith("user accounts"):
+                        continue
+                    if line.lower().startswith("the command"):
+                        continue
+                    for name in line.split():
+                        if not name:
+                            continue
+                        last_login = None
+                        try:
+                            ur = subprocess.run(
+                                ["net", "user", name],
+                                capture_output=True, text=True, timeout=5, creationflags=_NO_WIN,
+                            )
+                            for ul in ur.stdout.splitlines():
+                                if "last logon" in ul.lower():
+                                    parts = ul.split(None, 2)
+                                    if len(parts) >= 3:
+                                        last_login = parts[2].strip()
+                                    break
+                        except Exception:
+                            pass
+                        users.append({
+                            "username":   name,
+                            "is_admin":   name.lower() in admin_set,
+                            "last_login": last_login,
+                        })
+        except Exception as e:
+            log.debug(f"get_local_users: {e}")
+        return users
+
     # ── Firewall & Defender status ─────────────────────────────────────────────
 
     def scan_firewall_status(self) -> dict:

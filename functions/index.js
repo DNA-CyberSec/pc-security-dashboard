@@ -216,7 +216,7 @@ exports.realtimeHeartbeat = onRequest(async (req, res) => {
   if (req.method !== "POST")    { res.status(405).json({ error: "POST required" }); return; }
 
   const { token, deviceId, cpu_percent, ram_percent, ram_used_gb, ram_total_gb,
-          top_processes, temperatures, network } = req.body;
+          top_processes, temperatures, network, current_user, current_users } = req.body;
 
   const uid = await resolveToken(token);
   if (!uid) return res.status(401).json({ error: "Invalid or unknown AgentToken" });
@@ -243,6 +243,26 @@ exports.realtimeHeartbeat = onRequest(async (req, res) => {
     ...(req.body.ssh_failed_logins != null && { ssh_failed_logins: req.body.ssh_failed_logins }),
     ...(req.body.firewall_active   != null && { firewall_active:   req.body.firewall_active }),
   };
+
+  // Mirror current user info to device doc (Windows: current_user object; Linux: current_users array)
+  if (current_user && typeof current_user === "object") {
+    // Windows agent
+    Object.assign(deviceUpdate, {
+      current_username:         current_user.username         ?? null,
+      current_user_is_admin:    current_user.is_admin         ?? false,
+      current_user_session_type: current_user.session_type    ?? "local",
+      active_session_count:     1,
+    });
+  } else if (Array.isArray(current_users) && current_users.length > 0) {
+    // Linux agent — first session as primary
+    const primary = current_users[0];
+    Object.assign(deviceUpdate, {
+      current_username:          primary.username ?? null,
+      current_user_is_admin:     false,   // resolved server-side from sudoers if needed
+      current_user_session_type: primary.is_ssh ? "ssh" : "console",
+      active_session_count:      current_users.length,
+    });
+  }
 
   // Handle network data
   if (network && typeof network === "object") {
@@ -460,6 +480,37 @@ exports.sendLinuxCommand = onCall(async (request) => {
 
   return { commandId: cmdRef.id };
 });
+
+// ── setLatestAgentVersion ─────────────────────────────────────────────────────
+// HTTP POST (DEPLOY_SECRET auth): called by GitHub Actions after each build
+// to update /config/latestAgentVersion in Firestore.
+
+exports.setLatestAgentVersion = onRequest(
+  { secrets: ["DEPLOY_SECRET"] },
+  async (req, res) => {
+    res.set("Access-Control-Allow-Origin", "*");
+    if (req.method === "OPTIONS") { res.status(204).send(""); return; }
+    if (req.method !== "POST")    { res.status(405).json({ error: "POST required" }); return; }
+
+    const deploySecret = process.env.DEPLOY_SECRET;
+    const { secret, windows_version, linux_version, changelog } = req.body;
+
+    if (!secret || secret !== deploySecret) {
+      return res.status(401).json({ error: "Invalid secret" });
+    }
+
+    await db.collection("config").doc("latestAgentVersion").set({
+      windows_version: windows_version || null,
+      linux_version:   linux_version   || null,
+      changelog:       changelog        || "",
+      released_at:     admin.firestore.FieldValue.serverTimestamp(),
+      updatedAt:       admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+    console.log(`Agent version updated — windows=${windows_version} linux=${linux_version}`);
+    res.json({ ok: true });
+  }
+);
 
 // ── reportCommandResult ───────────────────────────────────────────────────────
 // HTTP POST (agent token auth): agent reports the result of executing a command.

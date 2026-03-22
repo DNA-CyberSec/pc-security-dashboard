@@ -28,7 +28,15 @@ import schedule
 # Constants
 # ---------------------------------------------------------------------------
 
-AGENT_VERSION = "0.1.0"
+def _read_version() -> str:
+    try:
+        _dir = os.path.dirname(os.path.abspath(__file__))
+        with open(os.path.join(_dir, "VERSION")) as _f:
+            return _f.read().strip()
+    except Exception:
+        return "1.0.0"
+
+AGENT_VERSION = _read_version()
 DEVICE_NAME = socket.gethostname()
 
 FUNCTIONS_BASE = "https://us-central1-pc-security-dashboard.cloudfunctions.net"
@@ -544,6 +552,69 @@ class LinuxScanner:
         except Exception:
             return None
 
+    # -- Current active sessions ---------------------------------------------
+
+    def get_current_users(self) -> list:
+        """Returns currently logged-in users via psutil."""
+        sessions = []
+        try:
+            for u in psutil.users():
+                sessions.append({
+                    "username": u.name,
+                    "terminal": u.terminal or "",
+                    "host":     u.host or "",
+                    "started":  u.started,
+                    "is_ssh":   bool(u.host and u.host not in ("", "localhost", "::1", "0.0.0.0")),
+                })
+        except Exception as exc:
+            logger.debug("get_current_users error: %s", exc)
+        return sessions
+
+    # -- All local user accounts --------------------------------------------
+
+    def get_all_users(self) -> list:
+        """Returns all local user accounts (uid >= 1000 plus root) from /etc/passwd."""
+        sudo_set = set(self.scan_sudo_users())
+        users = []
+        try:
+            with open("/etc/passwd", "r") as fh:
+                for line in fh:
+                    parts = line.strip().split(":")
+                    if len(parts) < 4:
+                        continue
+                    uname = parts[0]
+                    try:
+                        uid = int(parts[2])
+                    except ValueError:
+                        continue
+                    if uid < 1000 and uname != "root":
+                        continue
+                    last_login = None
+                    try:
+                        r = subprocess.run(
+                            ["lastlog", "-u", uname],
+                            capture_output=True, text=True, timeout=5
+                        )
+                        lines = r.stdout.strip().splitlines()
+                        if len(lines) >= 2:
+                            last_line = lines[-1]
+                            if "Never logged in" in last_line:
+                                last_login = "Never"
+                            else:
+                                ll_parts = last_line.split()
+                                if len(ll_parts) >= 5:
+                                    last_login = " ".join(ll_parts[-5:])
+                    except Exception:
+                        pass
+                    users.append({
+                        "username":   uname,
+                        "is_admin":   uname in sudo_set,
+                        "last_login": last_login,
+                    })
+        except Exception as exc:
+            logger.debug("get_all_users error: %s", exc)
+        return users
+
     # -- OS info -------------------------------------------------------------
 
     def scan_os_info(self) -> dict:
@@ -632,6 +703,11 @@ def health_score(scan: dict) -> int:
     elif sus_count >= 1:
         score -= 8
 
+    # Too many admin accounts
+    admin_count = sum(1 for u in scan.get("localUsers", []) if u.get("is_admin"))
+    if admin_count > 2:
+        score -= 5
+
     return max(0, min(100, score))
 
 
@@ -707,6 +783,7 @@ def send_realtime_heartbeat() -> None:
         _net_last_time[0] = now
 
     uptime_seconds = scanner.get_uptime_seconds()
+    current_users  = _safe("current_users_realtime", scanner.get_current_users)
 
     payload = {
         "token": AGENT_TOKEN,
@@ -722,6 +799,7 @@ def send_realtime_heartbeat() -> None:
         "temperatures": temps,
         "network": _net_cache,
         "uptime_seconds": uptime_seconds,
+        "current_users": current_users,
     }
 
     status, body = _post(REALTIME_URL, payload)
@@ -807,6 +885,8 @@ def run_scan() -> None:
     open_ports = _safe("scan_open_ports", scanner.scan_open_ports, [])
     os_info = _safe("scan_os_info", scanner.scan_os_info, {})
     uptime_seconds = _safe("get_uptime_seconds", scanner.get_uptime_seconds, 0)
+    local_users = _safe("get_all_users", scanner.get_all_users, [])
+    current_users = _safe("get_current_users", scanner.get_current_users, [])
 
     connected, latency_ms = scanner.get_internet_status()
     local_ip = scanner.get_local_ip()
@@ -850,6 +930,8 @@ def run_scan() -> None:
         "firewallStatus": firewall_status,
         "openPorts": open_ports,
         "networkInfo": network_info,
+        "localUsers": local_users,
+        "currentUsers": current_users,
         "healthScore": 0,  # placeholder, computed below
     }
 

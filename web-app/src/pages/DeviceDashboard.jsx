@@ -500,6 +500,7 @@ export default function DeviceDashboard({ user }) {
   const [activeTab,     setActiveTab]     = useState("overview"); // "overview" | "network" | "security"
   const [commands,      setCommands]      = useState([]);
   const [cmdLoading,    setCmdLoading]    = useState({});   // commandId → bool
+  const [latestVersion, setLatestVersion] = useState(null);
 
   const realtimeUnsubRef = useRef(null);
   const networkUnsubRef  = useRef(null);
@@ -594,6 +595,16 @@ export default function DeviceDashboard({ user }) {
       commandsUnsubRef.current = null;
     };
   }, [user.uid, deviceId, deviceDoc]);
+
+  // Latest agent version — for update badge
+  useEffect(() => {
+    const unsub = onSnapshot(
+      doc(db, "config", "latestAgentVersion"),
+      snap => { if (snap.exists()) setLatestVersion(snap.data()); },
+      () => {},
+    );
+    return () => unsub();
+  }, []);
 
   const sendCommand = async (type, payload = {}) => {
     const key = `${type}-${payload.ip || ""}`;
@@ -897,6 +908,132 @@ export default function DeviceDashboard({ user }) {
             >
               {t("dashboard.viewReport")}
             </button>
+          </div>
+
+          {/* Current Session */}
+          <div style={s.infoCard}>
+            <p style={s.cardTitle}>{t("users.currentSession")}</p>
+            {deviceDoc?.current_username ? (
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ fontSize: 22 }}>👤</span>
+                  <div>
+                    <p style={{ ...s.bigVal, fontSize: 16, marginBottom: 2 }}>{deviceDoc.current_username}</p>
+                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                      {deviceDoc.current_user_is_admin && (
+                        <span style={{ fontSize: 10, background: "#2d2008", border: "1px solid #7d4f00",
+                                       color: "#f6ad55", borderRadius: 4, padding: "2px 7px" }}>
+                          {t("users.admin")}
+                        </span>
+                      )}
+                      {!deviceDoc.current_user_is_admin && (
+                        <span style={{ fontSize: 10, background: "#0d1117", border: "1px solid #21262d",
+                                       color: "#8b949e", borderRadius: 4, padding: "2px 7px" }}>
+                          {t("users.standard")}
+                        </span>
+                      )}
+                      {deviceDoc.current_user_session_type && (
+                        <span style={{ fontSize: 10, background: "#0d1117", border: "1px solid #21262d",
+                                       color: "#58a6ff", borderRadius: 4, padding: "2px 7px" }}>
+                          {t(`users.${deviceDoc.current_user_session_type}`) || deviceDoc.current_user_session_type}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+                {deviceDoc.active_session_count > 1 && (
+                  <p style={s.muted}>{t("users.activeSessions", { n: deviceDoc.active_session_count })}</p>
+                )}
+              </div>
+            ) : (
+              <p style={s.muted}>{t("users.noActiveSession")}</p>
+            )}
+
+            {/* Local users table */}
+            {(latestScan?.localUsers?.length > 0) && (
+              <>
+                <p style={{ ...s.cardTitle, marginTop: 16 }}>{t("users.localUsers")}</p>
+                <table style={s.procTable}>
+                  <thead>
+                    <tr>
+                      <th style={s.th}>{t("users.username")}</th>
+                      <th style={s.th}>{t("users.role")}</th>
+                      <th style={{ ...s.th, textAlign: "right" }}>{t("users.lastLogin")}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {latestScan.localUsers.map((u, i) => (
+                      <tr key={i}>
+                        <td style={{ ...s.td, fontFamily: "monospace" }}>{u.username}</td>
+                        <td style={s.td}>
+                          {u.is_admin ? (
+                            <span style={{ fontSize: 11, color: "#f6ad55" }}>⭐ {t("users.admin")}</span>
+                          ) : (
+                            <span style={{ fontSize: 11, color: "#8b949e" }}>{t("users.standard")}</span>
+                          )}
+                        </td>
+                        <td style={{ ...s.td, textAlign: "right", color: "#8b949e", fontSize: 11 }}>
+                          {u.last_login || t("users.never")}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </>
+            )}
+          </div>
+
+          {/* Agent Info */}
+          <div style={s.infoCard}>
+            <p style={s.cardTitle}>{t("version.agentVersion")}</p>
+            {deviceDoc?.agentVersion ? (
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ fontSize: 22 }}>🤖</span>
+                  <p style={{ ...s.bigVal, fontSize: 20, fontFamily: "monospace" }}>
+                    v{deviceDoc.agentVersion}
+                  </p>
+                </div>
+                {(() => {
+                  const expected = deviceDoc?.os === "Linux"
+                    ? latestVersion?.linux_version
+                    : latestVersion?.windows_version;
+                  const isUpToDate = !expected || deviceDoc.agentVersion === expected;
+                  return isUpToDate ? (
+                    <span style={{ fontSize: 12, color: "#48bb78" }}>✓ {t("version.upToDate")}</span>
+                  ) : (
+                    <div>
+                      <span style={{ fontSize: 12, color: "#f6ad55" }}>
+                        ⬆ {t("version.updateAvailable")} → v{expected}
+                      </span>
+                      <div style={{ marginTop: 10 }}>
+                        {deviceDoc?.os === "Linux" ? (
+                          <p style={{ fontSize: 11, color: "#8b949e", lineHeight: 1.6 }}>
+                            {t("version.linuxUpdateCmd")}<br />
+                            <code style={{ fontFamily: "monospace", color: "#58a6ff", fontSize: 11 }}>
+                              curl -sSL https://pcguard-rami.web.app/install.sh | bash
+                            </code>
+                          </p>
+                        ) : (
+                          <a
+                            href="https://github.com/DNA-CyberSec/pc-security-dashboard/releases/latest/download/PCGuard-Setup.exe"
+                            target="_blank" rel="noreferrer"
+                            style={{ fontSize: 12, color: "#1f6feb",
+                                     background: "#1f6feb22", borderRadius: 6,
+                                     padding: "6px 14px", textDecoration: "none",
+                                     display: "inline-block" }}
+                          >
+                            ⬇ {t("version.downloadWindows")}
+                          </a>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })()}
+              </div>
+            ) : (
+              <p style={s.muted}>{t("dashboard.noAgentData")}</p>
+            )}
           </div>
 
           {/* Last scan + countdown */}

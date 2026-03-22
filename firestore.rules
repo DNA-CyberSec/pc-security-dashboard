@@ -51,6 +51,12 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // ── Global config (latest agent version, etc.) — authenticated read only ─
+    match /config/{doc} {
+      allow read:  if request.auth != null;
+      allow write: if false;
+    }
+
     // ── Deny everything else ───────────────────────────────────────────────
     match /{document=**} {
       allow read, write: if false;

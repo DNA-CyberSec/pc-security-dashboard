@@ -102,6 +102,7 @@ jobs:
           mkdir -p dist-linux
           cp agent-linux/linux_agent.py dist-linux/
           cp agent-linux/requirements-linux.txt dist-linux/
+          cp agent-linux/VERSION dist-linux/
           tar -czf PCGuard-Linux.tar.gz -C dist-linux .
 
       - name: Upload Linux artifact
@@ -123,3 +124,11 @@ jobs:
           artifacts: PCGuard-Linux.tar.gz
           token: ${{ secrets.GITHUB_TOKEN }}
           omitBody: true
+
+      - name: Update latestAgentVersion in Firestore
+        run: |
+          VERSION="${{ steps.version.outputs.VERSION }}"
+          curl -sSf -X POST \
+            "https://us-central1-pc-security-dashboard.cloudfunctions.net/setLatestAgentVersion" \
+            -H "Content-Type: application/json" \
+            -d "{\"secret\":\"${{ secrets.DEPLOY_SECRET }}\",\"windows_version\":\"${VERSION}\",\"linux_version\":\"${VERSION}\",\"changelog\":\"PCGuard v${VERSION}\"}"
