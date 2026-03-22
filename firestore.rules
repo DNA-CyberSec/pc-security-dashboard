@@ -3,8 +3,27 @@ service cloud.firestore {
   match /databases/{database}/documents {
 
     // ── User document ──────────────────────────────────────────────────────
+    // Client can read their own user doc (needed for Setup page token display).
+    // Client can create/update their own user doc (e.g. language preference)
+    // but CANNOT set or modify server-controlled fields (agentToken,
+    // agentTokenCreatedAt) — those are written exclusively by Cloud Functions.
     match /users/{uid} {
-      allow read, write: if request.auth != null && request.auth.uid == uid;
+      allow read: if request.auth != null && request.auth.uid == uid;
+
+      // On create: client may not set agentToken / agentTokenCreatedAt
+      allow create: if request.auth != null && request.auth.uid == uid
+        && !("agentToken"          in request.resource.data)
+        && !("agentTokenCreatedAt" in request.resource.data);
+
+      // On update: client may not change agentToken / agentTokenCreatedAt
+      // once set by the Cloud Function.  Comparing to resource.data (the
+      // existing doc) guards against overwrite; the guard only fires when the
+      // field already exists so a brand-new user doc still works.
+      allow update: if request.auth != null && request.auth.uid == uid
+        && (!("agentToken" in resource.data)
+            || request.resource.data.agentToken == resource.data.agentToken)
+        && (!("agentTokenCreatedAt" in resource.data)
+            || request.resource.data.agentTokenCreatedAt == resource.data.agentTokenCreatedAt);
 
       // ── Per-device data ──────────────────────────────────────────────────
       // Device document stores status summary + nickname (client can update nickname)

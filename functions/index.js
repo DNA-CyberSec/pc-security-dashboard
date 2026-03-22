@@ -46,6 +46,40 @@ function sanitizeDeviceId(raw) {
   return raw.replace(/[^a-zA-Z0-9_\-]/g, "_").slice(0, 128) || "default";
 }
 
+/**
+ * Validate an IPv4 address string — each octet must be 0–255.
+ * Rejects partial matches like 999.999.999.999 that the loose regex would pass.
+ */
+function isValidIPv4(ip) {
+  if (!ip || typeof ip !== "string") return false;
+  const parts = ip.split(".");
+  if (parts.length !== 4) return false;
+  return parts.every(p => /^\d{1,3}$/.test(p) && parseInt(p, 10) <= 255);
+}
+
+/**
+ * Timing-safe comparison for shared secrets.
+ * Falls back to false if either value is missing or lengths differ.
+ */
+function timingSafeEqual(a, b) {
+  if (!a || !b) return false;
+  const ba = Buffer.from(a);
+  const bb = Buffer.from(b);
+  if (ba.length !== bb.length) return false;
+  return crypto.timingSafeEqual(ba, bb);
+}
+
+/** Reject oversized request bodies before processing (max 512 KB). */
+const MAX_BODY_BYTES = 512 * 1024;
+function checkPayloadSize(req, res) {
+  const size = JSON.stringify(req.body).length;
+  if (size > MAX_BODY_BYTES) {
+    res.status(413).json({ error: "Payload too large" });
+    return false;
+  }
+  return true;
+}
+
 // ── generateAgentToken ────────────────────────────────────────────────────────
 
 exports.generateAgentToken = onCall(async (request) => {
@@ -137,6 +171,7 @@ exports.submitScan = onRequest(async (req, res) => {
   res.set("Access-Control-Allow-Origin", "*");
   if (req.method === "OPTIONS") { res.status(204).send(""); return; }
   if (req.method !== "POST")    { res.status(405).json({ error: "POST required" }); return; }
+  if (!checkPayloadSize(req, res)) return;
 
   const { token, scan, deviceId } = req.body;
   if (!scan || typeof scan !== "object") {
@@ -213,6 +248,7 @@ exports.realtimeHeartbeat = onRequest(async (req, res) => {
   res.set("Access-Control-Allow-Origin", "*");
   if (req.method === "OPTIONS") { res.status(204).send(""); return; }
   if (req.method !== "POST")    { res.status(405).json({ error: "POST required" }); return; }
+  if (!checkPayloadSize(req, res)) return;
 
   const body = req.body;
   const { token, deviceId, temperatures, network, current_user, current_users } = body;
@@ -464,8 +500,8 @@ exports.sendLinuxCommand = onCall(async (request) => {
   if (type === "block_ip" && !ip) {
     throw new HttpsError("invalid-argument", "ip required for block_ip");
   }
-  // Basic IP validation
-  if (ip && !/^(\d{1,3}\.){3}\d{1,3}$/.test(ip)) {
+  // Strict IP validation — each octet must be 0–255
+  if (ip && !isValidIPv4(ip)) {
     throw new HttpsError("invalid-argument", "Invalid IP address format");
   }
 
@@ -494,14 +530,14 @@ exports.sendLinuxCommand = onCall(async (request) => {
 exports.setLatestAgentVersion = onRequest(
   { secrets: ["DEPLOY_SECRET"] },
   async (req, res) => {
-    res.set("Access-Control-Allow-Origin", "*");
-    if (req.method === "OPTIONS") { res.status(204).send(""); return; }
-    if (req.method !== "POST")    { res.status(405).json({ error: "POST required" }); return; }
+    // Admin endpoint — called only by GitHub Actions (curl), not from browsers.
+    // No CORS wildcard needed here.
+    if (req.method !== "POST") { res.status(405).json({ error: "POST required" }); return; }
 
-    const deploySecret = process.env.DEPLOY_SECRET;
     const { secret, windows_version, linux_version, changelog } = req.body;
 
-    if (!secret || secret !== deploySecret) {
+    // Timing-safe comparison to prevent secret enumeration via response time
+    if (!timingSafeEqual(secret, process.env.DEPLOY_SECRET)) {
       return res.status(401).json({ error: "Invalid secret" });
     }
 
@@ -525,12 +561,11 @@ exports.setLatestAgentVersion = onRequest(
 exports.adminCleanupAllUsers = onRequest(
   { secrets: ["DEPLOY_SECRET"] },
   async (req, res) => {
-    res.set("Access-Control-Allow-Origin", "*");
-    if (req.method === "OPTIONS") { res.status(204).send(""); return; }
-    if (req.method !== "POST")    { res.status(405).json({ error: "POST required" }); return; }
+    // Admin endpoint — no CORS wildcard needed (server-to-server only).
+    if (req.method !== "POST") { res.status(405).json({ error: "POST required" }); return; }
 
     const { secret } = req.body;
-    if (!secret || secret !== process.env.DEPLOY_SECRET) {
+    if (!timingSafeEqual(secret, process.env.DEPLOY_SECRET)) {
       return res.status(401).json({ error: "Invalid secret" });
     }
 

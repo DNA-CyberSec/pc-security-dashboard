@@ -118,6 +118,11 @@ def save_config(cfg: dict) -> None:
     os.makedirs(os.path.dirname(CONFIG_PATH), exist_ok=True)
     with open(CONFIG_PATH, "w") as fh:
         json.dump(cfg, fh, indent=2)
+    # Restrict permissions so only root can read the token
+    try:
+        os.chmod(CONFIG_PATH, 0o600)
+    except OSError:
+        pass
 
 
 # ---------------------------------------------------------------------------
@@ -411,8 +416,9 @@ class LinuxScanner:
     def scan_suid_suspects(self) -> list:
         try:
             result = subprocess.run(
-                "find /tmp /dev/shm /var/tmp /run/shm -perm -4000 -type f 2>/dev/null",
-                shell=True, capture_output=True, text=True, timeout=10
+                ["find", "/tmp", "/dev/shm", "/var/tmp", "/run/shm",
+                 "-perm", "-4000", "-type", "f"],
+                capture_output=True, text=True, timeout=10
             )
             paths = [p.strip() for p in result.stdout.splitlines() if p.strip()]
             return paths
@@ -425,8 +431,8 @@ class LinuxScanner:
     def scan_world_writable_etc(self) -> list:
         try:
             result = subprocess.run(
-                "find /etc -maxdepth 2 -type f -writable 2>/dev/null",
-                shell=True, capture_output=True, text=True, timeout=10
+                ["find", "/etc", "-maxdepth", "2", "-type", "f", "-writable"],
+                capture_output=True, text=True, timeout=10
             )
             paths = [p.strip() for p in result.stdout.splitlines() if p.strip()]
             return paths
@@ -466,16 +472,15 @@ class LinuxScanner:
         except Exception as exc:
             logger.debug("ufw status error: %s", exc)
 
-        # Fallback: count iptables ACCEPT rules
+        # Fallback: count iptables ACCEPT rules (count in Python, no shell pipe needed)
         if not active:
             try:
                 result = subprocess.run(
-                    "iptables -n -L --line-numbers 2>/dev/null | grep -c ACCEPT",
-                    shell=True, capture_output=True, text=True, timeout=10
+                    ["iptables", "-n", "-L", "--line-numbers"],
+                    capture_output=True, text=True, timeout=10
                 )
-                count_str = result.stdout.strip()
-                if count_str.isdigit():
-                    iptables_count = int(count_str)
+                if result.returncode == 0:
+                    iptables_count = result.stdout.count("ACCEPT")
                     if iptables_count > 0 and rules_count == 0:
                         rules_count = iptables_count
             except Exception as exc:
@@ -812,6 +817,21 @@ def send_realtime_heartbeat() -> None:
         execute_commands(pending)
 
 
+def _is_valid_ipv4(ip: str) -> bool:
+    """Validate each octet is a decimal integer 0–255 (defense in depth)."""
+    parts = ip.split(".")
+    if len(parts) != 4:
+        return False
+    try:
+        return all(0 <= int(p) <= 255 for p in parts)
+    except ValueError:
+        return False
+
+
+# Maximum bytes kept from command output stored in Firestore
+_CMD_OUTPUT_LIMIT = 2000
+
+
 def execute_commands(commands: list) -> None:
     scanner = LinuxScanner()
     for cmd in commands:
@@ -823,13 +843,15 @@ def execute_commands(commands: list) -> None:
         try:
             if cmd_type == "block_ip":
                 ip = cmd.get("ip", "").strip()
-                if ip:
+                if ip and _is_valid_ipv4(ip):
                     result = subprocess.run(
                         ["ufw", "deny", "from", ip],
                         capture_output=True, text=True, timeout=10
                     )
-                    output = result.stdout + result.stderr
+                    output = (result.stdout + result.stderr)[:_CMD_OUTPUT_LIMIT]
                     success = result.returncode == 0
+                elif ip:
+                    output = "Invalid IP address rejected"
                 else:
                     output = "No IP provided"
 
@@ -838,7 +860,7 @@ def execute_commands(commands: list) -> None:
                     ["ufw", "--force", "enable"],
                     capture_output=True, text=True, timeout=10
                 )
-                output = result.stdout + result.stderr
+                output = (result.stdout + result.stderr)[:_CMD_OUTPUT_LIMIT]
                 success = result.returncode == 0
 
             else:
