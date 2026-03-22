@@ -79,16 +79,24 @@ echo -e "  ${GREEN}✓ Python virtual environment ready${NC}"
 
 # ── Get Agent Token ───────────────────────────────────────────────────────────
 echo -e "${YELLOW}[4/5] Configuration${NC}"
-echo ""
-echo "  Your Agent Token links this server to your PC Guard account."
-echo "  Find it at: https://pcguard-rami.web.app/setup"
-echo ""
-printf "  Paste your Agent Token (pcg-...): "
-read -r AGENT_TOKEN
+
+# Support passing token as argument: bash -s -- YOUR_TOKEN
+AGENT_TOKEN="${1:-}"
 
 if [ -z "$AGENT_TOKEN" ]; then
-  echo -e "  ${RED}✗ Token cannot be empty.${NC}"
-  exit 1
+  echo ""
+  echo "  Your Agent Token links this server to your PC Guard account."
+  echo "  Find it at: https://pcguard-rami.web.app/setup"
+  echo ""
+  # When piped via curl | bash, stdin is the script itself — use /dev/tty
+  while true; do
+    printf "  Paste your Agent Token (pcg-...): "
+    read -r AGENT_TOKEN < /dev/tty
+    if [ -n "$AGENT_TOKEN" ]; then
+      break
+    fi
+    echo -e "  ${RED}✗ Token cannot be empty. Please try again.${NC}"
+  done
 fi
 
 # Write config
