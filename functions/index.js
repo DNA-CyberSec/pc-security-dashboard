@@ -107,20 +107,19 @@ exports.agentHeartbeat = onRequest(async (req, res) => {
       online:        true,
     }, { merge: true });
 
-  // Auto-deduplicate: if another doc has the same COMPUTERNAME, delete it
+  // Auto-deduplicate: if another doc has the same COMPUTERNAME (case-insensitive), delete it
   if (resolvedName !== "unknown") {
     try {
-      const dupeSnap = await db.collection("users").doc(uid)
-        .collection("devices")
-        .where("name", "==", resolvedName)
-        .get();
-      if (dupeSnap.size > 1) {
+      const allDevices = await db.collection("users").doc(uid).collection("devices").get();
+      const nameLower  = resolvedName.toLowerCase();
+      const dupes      = allDevices.docs.filter(d =>
+        d.id !== did && (d.data().name || "").toLowerCase() === nameLower
+      );
+      if (dupes.length > 0) {
         const batch = db.batch();
-        dupeSnap.docs
-          .filter(d => d.id !== did)
-          .forEach(d => batch.delete(d.ref));
+        dupes.forEach(d => batch.delete(d.ref));
         await batch.commit();
-        console.log(`Deduped ${dupeSnap.size - 1} stale device(s) for uid=${uid} name="${resolvedName}"`);
+        console.log(`Deduped ${dupes.length} stale device(s) for uid=${uid} name="${resolvedName}"`);
       }
     } catch (e) {
       console.warn("Dedup check failed:", e.message);
@@ -509,6 +508,56 @@ exports.setLatestAgentVersion = onRequest(
 
     console.log(`Agent version updated — windows=${windows_version} linux=${linux_version}`);
     res.json({ ok: true });
+  }
+);
+
+// ── adminCleanupAllUsers ──────────────────────────────────────────────────────
+// HTTP POST (DEPLOY_SECRET auth): runs case-insensitive duplicate cleanup
+// across ALL users.  Call once to fix existing duplicates.
+
+exports.adminCleanupAllUsers = onRequest(
+  { secrets: ["DEPLOY_SECRET"] },
+  async (req, res) => {
+    res.set("Access-Control-Allow-Origin", "*");
+    if (req.method === "OPTIONS") { res.status(204).send(""); return; }
+    if (req.method !== "POST")    { res.status(405).json({ error: "POST required" }); return; }
+
+    const { secret } = req.body;
+    if (!secret || secret !== process.env.DEPLOY_SECRET) {
+      return res.status(401).json({ error: "Invalid secret" });
+    }
+
+    const usersSnap = await db.collection("users").get();
+    let totalDeleted = 0;
+
+    for (const userDoc of usersSnap.docs) {
+      const uid         = userDoc.id;
+      const devicesSnap = await db.collection("users").doc(uid).collection("devices").get();
+      if (devicesSnap.empty) continue;
+
+      const byName = {};
+      devicesSnap.docs.forEach(d => {
+        const key = (d.data().name || "").toLowerCase().trim();
+        if (!key) return;
+        if (!byName[key]) byName[key] = [];
+        byName[key].push({ id: d.id, ref: d.ref, ts: d.data().last_seen?.toMillis?.() ?? 0 });
+      });
+
+      const batch = db.batch();
+      let deleted  = 0;
+      for (const group of Object.values(byName)) {
+        if (group.length <= 1) continue;
+        group.sort((a, b) => b.ts - a.ts);          // keep freshest
+        group.slice(1).forEach(({ ref }) => { batch.delete(ref); deleted++; });
+      }
+      if (deleted > 0) {
+        await batch.commit();
+        console.log(`adminCleanup uid=${uid}: deleted ${deleted} duplicate(s)`);
+        totalDeleted += deleted;
+      }
+    }
+
+    res.json({ ok: true, totalDeleted });
   }
 );
 

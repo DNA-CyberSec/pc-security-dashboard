@@ -3,7 +3,8 @@ import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { signOut } from "firebase/auth";
 import { collection, doc, onSnapshot, setDoc } from "firebase/firestore";
-import { auth, db } from "../firebase";
+import { httpsCallable } from "firebase/functions";
+import { auth, db, functions } from "../firebase";
 import { useResponsive } from "../hooks/useResponsive";
 
 // ── Update Modal ───────────────────────────────────────────────────────────────
@@ -421,6 +422,8 @@ export default function Dashboard({ user }) {
   const [nicknameInput,  setNicknameInput]   = useState("");
   const [latestVersion,  setLatestVersion]   = useState(null);   // /config/latestAgentVersion
   const [updateModal,    setUpdateModal]     = useState(null);   // device object or null
+  const [dedupLoading,   setDedupLoading]   = useState(false);
+  const [dedupResult,    setDedupResult]    = useState(null);    // { deleted: n } after cleanup
 
   const realtimeUnsubsRef = useRef({});
 
@@ -493,6 +496,29 @@ export default function Dashboard({ user }) {
   const avgHealth    = devices.length > 0
     ? Math.round(devices.reduce((s, d) => s + (d.healthScore || 0), 0) / devices.length)
     : null;
+
+  // Detect case-insensitive duplicate device names
+  const nameCounts = {};
+  devices.forEach(d => {
+    const key = (d.name || "").toLowerCase().trim();
+    if (key) nameCounts[key] = (nameCounts[key] || 0) + 1;
+  });
+  const hasDuplicates = Object.values(nameCounts).some(n => n > 1);
+
+  const runDedup = async () => {
+    setDedupLoading(true);
+    setDedupResult(null);
+    try {
+      const fn = httpsCallable(functions, "cleanupDuplicateDevices");
+      const result = await fn();
+      setDedupResult(result.data);
+    } catch (err) {
+      console.error("Dedup failed:", err);
+      setDedupResult({ error: err.message });
+    } finally {
+      setDedupLoading(false);
+    }
+  };
 
   const effectiveMode = viewMode || (devices.length >= 6 ? "table" : "grid");
 
@@ -639,6 +665,39 @@ export default function Dashboard({ user }) {
                 </div>
               ))}
             </div>
+
+            {/* ── Duplicate device banner ───────────────────────────────── */}
+            {(hasDuplicates || dedupResult) && (
+              <div style={{
+                display: "flex", alignItems: "center", justifyContent: "space-between",
+                flexWrap: "wrap", gap: 10,
+                padding: "10px 16px", marginBottom: 14,
+                background: dedupResult?.deleted > 0 ? "#0d2818" : dedupResult?.error ? "#2d1b1b" : "#2d2008",
+                border: `1px solid ${dedupResult?.deleted > 0 ? "#238636" : dedupResult?.error ? "#742a2a" : "#7d4f00"}`,
+                borderRadius: 10,
+              }}>
+                <span style={{ fontSize: 13, color: dedupResult?.deleted > 0 ? "#56d364" : dedupResult?.error ? "#fc8181" : "#f6ad55" }}>
+                  {dedupResult?.deleted > 0
+                    ? `✅ Removed ${dedupResult.deleted} duplicate device${dedupResult.deleted > 1 ? "s" : ""}`
+                    : dedupResult?.error
+                    ? `❌ Cleanup failed: ${dedupResult.error}`
+                    : "⚠️ Duplicate device names detected"}
+                </span>
+                {!dedupResult?.deleted && (
+                  <button
+                    onClick={runDedup}
+                    disabled={dedupLoading}
+                    style={{
+                      background: "#7d4f00", color: "#f6ad55", border: "1px solid #7d4f00",
+                      borderRadius: 6, padding: "5px 14px", cursor: "pointer", fontSize: 12,
+                      opacity: dedupLoading ? 0.6 : 1,
+                    }}
+                  >
+                    {dedupLoading ? "Fixing…" : "Fix duplicates"}
+                  </button>
+                )}
+              </div>
+            )}
 
             {/* ── Filter + search bar ───────────────────────────────────── */}
             <div style={s.filterBar}>
