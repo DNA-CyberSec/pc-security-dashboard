@@ -50,6 +50,12 @@ LOG_PATH = "/opt/pcguard/agent.log"
 
 DANGEROUS_PORTS = {23, 3389, 5900, 4444, 1337, 4899, 6667, 31337}
 
+
+def _ufw_cmd(*args: str) -> list:
+    """Return ufw command prefixed with sudo when not running as root."""
+    prefix = [] if os.geteuid() == 0 else ["sudo"]
+    return prefix + ["ufw"] + list(args)
+
 SUSPICIOUS_NAMES = {
     "nc", "ncat", "netcat", "nmap", "masscan", "sqlmap",
     "hydra", "john", "hashcat", "msfconsole", "msfvenom",
@@ -449,7 +455,7 @@ class LinuxScanner:
 
         try:
             result = subprocess.run(
-                ["ufw", "status"],
+                _ufw_cmd("status"),
                 capture_output=True, text=True, timeout=10
             )
             ufw_available = True
@@ -885,7 +891,7 @@ def execute_commands(commands: list) -> None:
                 ip = cmd.get("ip", "").strip()
                 if ip and _is_valid_ipv4(ip):
                     result = subprocess.run(
-                        ["ufw", "deny", "from", ip],
+                        _ufw_cmd("deny", "from", ip),
                         capture_output=True, text=True, timeout=10
                     )
                     output = (result.stdout + result.stderr)[:_CMD_OUTPUT_LIMIT]
@@ -897,7 +903,7 @@ def execute_commands(commands: list) -> None:
 
             elif cmd_type == "enable_ufw":
                 result = subprocess.run(
-                    ["ufw", "--force", "enable"],
+                    _ufw_cmd("--force", "enable"),
                     capture_output=True, text=True, timeout=10
                 )
                 output = (result.stdout + result.stderr)[:_CMD_OUTPUT_LIMIT]

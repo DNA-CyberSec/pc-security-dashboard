@@ -60,11 +60,22 @@ jobs:
             --hidden-import=modules.network_info `
             setup_wizard.py
 
+      - name: Generate Windows checksum
+        shell: python
+        run: |
+          import hashlib, pathlib
+          exe = pathlib.Path("agent/dist/PCGuard-Setup.exe")
+          digest = hashlib.sha256(exe.read_bytes()).hexdigest()
+          pathlib.Path("agent/dist/PCGuard-Setup.exe.sha256").write_text(digest + "\n")
+          print(f"SHA256: {digest}")
+
       - name: Upload Windows artifact
         uses: actions/upload-artifact@v4
         with:
           name: PCGuard-Setup
-          path: agent/dist/PCGuard-Setup.exe
+          path: |
+            agent/dist/PCGuard-Setup.exe
+            agent/dist/PCGuard-Setup.exe.sha256
 
       - name: Get version from package.json
         id: version
@@ -77,7 +88,7 @@ jobs:
           tag: v${{ steps.version.outputs.VERSION }}
           name: PCGuard v${{ steps.version.outputs.VERSION }}
           allowUpdates: true
-          artifacts: agent/dist/PCGuard-Setup.exe
+          artifacts: "agent/dist/PCGuard-Setup.exe,agent/dist/PCGuard-Setup.exe.sha256"
           token: ${{ secrets.GITHUB_TOKEN }}
           body: |
             ## PCGuard v${{ steps.version.outputs.VERSION }}
@@ -139,11 +150,16 @@ jobs:
           cp agent-linux/VERSION dist-linux/
           tar -czf PCGuard-Linux.tar.gz -C dist-linux .
 
+      - name: Generate Linux checksum
+        run: sha256sum PCGuard-Linux.tar.gz | awk '{print $1}' > PCGuard-Linux.tar.gz.sha256
+
       - name: Upload Linux artifact
         uses: actions/upload-artifact@v4
         with:
           name: PCGuard-Linux
-          path: PCGuard-Linux.tar.gz
+          path: |
+            PCGuard-Linux.tar.gz
+            PCGuard-Linux.tar.gz.sha256
 
       - name: Get version from package.json
         id: version
@@ -155,7 +171,7 @@ jobs:
           tag: v${{ steps.version.outputs.VERSION }}
           name: PCGuard v${{ steps.version.outputs.VERSION }}
           allowUpdates: true
-          artifacts: PCGuard-Linux.tar.gz
+          artifacts: "PCGuard-Linux.tar.gz,PCGuard-Linux.tar.gz.sha256"
           token: ${{ secrets.GITHUB_TOKEN }}
           omitBody: true
 
@@ -201,11 +217,16 @@ jobs:
           cp agent-mac/VERSION          dist-mac/
           tar -czf PCGuard-Mac.tar.gz -C dist-mac .
 
+      - name: Generate macOS checksum
+        run: sha256sum PCGuard-Mac.tar.gz | awk '{print $1}' > PCGuard-Mac.tar.gz.sha256
+
       - name: Upload macOS artifact
         uses: actions/upload-artifact@v4
         with:
           name: PCGuard-Mac
-          path: PCGuard-Mac.tar.gz
+          path: |
+            PCGuard-Mac.tar.gz
+            PCGuard-Mac.tar.gz.sha256
 
       - name: Get version from package.json
         id: version
@@ -217,7 +238,7 @@ jobs:
           tag: v${{ steps.version.outputs.VERSION }}
           name: PCGuard v${{ steps.version.outputs.VERSION }}
           allowUpdates: true
-          artifacts: PCGuard-Mac.tar.gz
+          artifacts: "PCGuard-Mac.tar.gz,PCGuard-Mac.tar.gz.sha256"
           token: ${{ secrets.GITHUB_TOKEN }}
           omitBody: true
 

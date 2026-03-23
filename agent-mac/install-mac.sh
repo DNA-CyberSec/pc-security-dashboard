@@ -3,17 +3,30 @@
 # Supports: macOS 12+ (Monterey and later)
 # Run: curl -sSL https://pcguard-rami.web.app/install-mac.sh | bash
 # No sudo required.
+#
+# Token can be supplied via environment variable to avoid ps aux exposure:
+#   PCGUARD_TOKEN=pcg-xxx curl -sSL https://pcguard-rami.web.app/install-mac.sh | bash
 
-set -e
+set -euo pipefail
 
 INSTALL_DIR="$HOME/Library/Application Support/PCGuard"
 LOG_DIR="$HOME/Library/Logs/PCGuard"
 LAUNCH_AGENTS_DIR="$HOME/Library/LaunchAgents"
 PLIST_LABEL="com.pcguard.agent"
 PLIST_PATH="$LAUNCH_AGENTS_DIR/$PLIST_LABEL.plist"
-RELEASE_URL="https://github.com/DNA-CyberSec/pc-security-dashboard/releases/latest/download/PCGuard-Mac.tar.gz"
+RELEASE_BASE="https://github.com/DNA-CyberSec/pc-security-dashboard/releases/latest/download"
+RELEASE_URL="${RELEASE_BASE}/PCGuard-Mac.tar.gz"
+CHECKSUM_URL="${RELEASE_BASE}/PCGuard-Mac.tar.gz.sha256"
 
 GREEN='\033[0;32m'; YELLOW='\033[1;33m'; RED='\033[0;31m'; CYAN='\033[0;36m'; NC='\033[0m'
+
+# ── Temp file cleanup on any exit (normal, error, or signal) ─────────────────
+TMP_TAR=""
+TMP_SHA=""
+cleanup() {
+  rm -f "$TMP_TAR" "$TMP_SHA" 2>/dev/null || true
+}
+trap cleanup EXIT
 
 echo ""
 echo "╔══════════════════════════════════════════════╗"
@@ -62,21 +75,39 @@ fi
 PY_VERSION=$("$PYTHON3" --version 2>&1)
 echo -e "  $PY_VERSION — ${GREEN}✓${NC}"
 
-# ── Download agent ───────────────────────────────────────────────────────────
-echo -e "${YELLOW}[2/5] Downloading PCGuard agent...${NC}"
+# ── Download + verify agent ───────────────────────────────────────────────────
+echo -e "${YELLOW}[2/5] Downloading and verifying PCGuard agent...${NC}"
 
 mkdir -p "$INSTALL_DIR"
 
+TMP_SHA="$(mktemp /tmp/pcguard-XXXXXX.sha256)"
 TMP_TAR="$(mktemp /tmp/pcguard-XXXXXX.tar.gz)"
-if curl -sSL -o "$TMP_TAR" "$RELEASE_URL"; then
-  tar -xzf "$TMP_TAR" -C "$INSTALL_DIR"
-  rm -f "$TMP_TAR"
-  echo -e "  ${GREEN}✓ Agent downloaded${NC}"
-else
-  echo -e "  ${RED}✗ Download failed. Check internet connection.${NC}"
-  rm -f "$TMP_TAR"
+
+# Download checksum file first (from HTTPS — provides integrity anchor)
+if ! curl -sSLf -o "$TMP_SHA" "$CHECKSUM_URL"; then
+  echo -e "${RED}✗ Failed to download checksum file.${NC}"
   exit 1
 fi
+
+# Download tarball (--fail: treat HTTP 4xx/5xx as errors, not silent success)
+if ! curl -sSLf -o "$TMP_TAR" "$RELEASE_URL"; then
+  echo -e "${RED}✗ Download failed. Check internet connection.${NC}"
+  exit 1
+fi
+
+# Verify SHA256 checksum (macOS uses shasum -a 256)
+EXPECTED=$(awk '{print $1}' "$TMP_SHA")
+ACTUAL=$(shasum -a 256 "$TMP_TAR" | awk '{print $1}')
+if [ -z "$EXPECTED" ] || [ "$EXPECTED" != "$ACTUAL" ]; then
+  echo -e "${RED}✗ CHECKSUM MISMATCH — download may be corrupted or tampered with.${NC}"
+  echo -e "  Expected: ${EXPECTED}"
+  echo -e "  Actual:   ${ACTUAL}"
+  exit 1
+fi
+echo -e "  ${GREEN}✓ SHA256 checksum verified${NC}"
+
+tar -xzf "$TMP_TAR" -C "$INSTALL_DIR"
+echo -e "  ${GREEN}✓ Agent extracted${NC}"
 
 # ── Python virtualenv + packages ────────────────────────────────────────────
 echo -e "${YELLOW}[3/5] Setting up Python environment...${NC}"
@@ -84,18 +115,22 @@ echo -e "${YELLOW}[3/5] Setting up Python environment...${NC}"
 VENV_DIR="$INSTALL_DIR/venv"
 "$PYTHON3" -m venv "$VENV_DIR"
 "$VENV_DIR/bin/pip" install -q --upgrade pip
-"$VENV_DIR/bin/pip" install -q -r "$INSTALL_DIR/requirements.txt"
+"$VENV_DIR/bin/pip" install -q --no-input -r "$INSTALL_DIR/requirements.txt"
 echo -e "  ${GREEN}✓ Python environment ready${NC}"
 
 # ── Agent Token ─────────────────────────────────────────────────────────────
 echo -e "${YELLOW}[4/5] Configuration${NC}"
 
-AGENT_TOKEN="${1:-}"
+# Prefer env var over interactive — env vars are NOT visible in ps aux
+# Usage: PCGUARD_TOKEN=pcg-xxx curl -sSL ... | bash
+AGENT_TOKEN="${PCGUARD_TOKEN:-}"
 
 if [ -z "$AGENT_TOKEN" ]; then
   echo ""
   echo "  Your Agent Token links this Mac to your PCGuard account."
   echo "  Find it at: https://pcguard-rami.web.app/setup"
+  echo ""
+  echo "  Tip: set PCGUARD_TOKEN=pcg-... to avoid it appearing in process list."
   echo ""
   while true; do
     printf "  Paste your Agent Token (pcg-...): "
@@ -107,7 +142,7 @@ if [ -z "$AGENT_TOKEN" ]; then
   done
 fi
 
-# Write config
+# Write config — mode 600 (owner-read/write only)
 mkdir -p "$INSTALL_DIR"
 cat > "$INSTALL_DIR/config.json" <<EOF
 {
@@ -117,13 +152,14 @@ cat > "$INSTALL_DIR/config.json" <<EOF
 }
 EOF
 chmod 600 "$INSTALL_DIR/config.json"
-echo -e "  ${GREEN}✓ Configuration saved${NC}"
+echo -e "  ${GREEN}✓ Configuration saved (mode 600)${NC}"
 
 # ── launchd plist ───────────────────────────────────────────────────────────
 echo -e "${YELLOW}[5/5] Installing launchd service...${NC}"
 
 mkdir -p "$LAUNCH_AGENTS_DIR"
 mkdir -p "$LOG_DIR"
+chmod 750 "$LOG_DIR"
 
 VENV_PYTHON="$VENV_DIR/bin/python3"
 AGENT_PY="$INSTALL_DIR/mac_agent.py"
